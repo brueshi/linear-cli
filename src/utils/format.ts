@@ -1,0 +1,163 @@
+import chalk from 'chalk';
+import type { Issue, WorkflowState, User } from '@linear/sdk';
+
+/**
+ * Color mapping for workflow state categories
+ */
+const STATE_COLORS: Record<string, (text: string) => string> = {
+  backlog: chalk.gray,
+  unstarted: chalk.blue,
+  started: chalk.yellow,
+  completed: chalk.green,
+  canceled: chalk.red,
+  triage: chalk.magenta,
+};
+
+/**
+ * Priority labels and colors
+ */
+const PRIORITY_MAP: Record<number, { label: string; color: (text: string) => string }> = {
+  0: { label: 'None', color: chalk.gray },
+  1: { label: 'Urgent', color: chalk.red },
+  2: { label: 'High', color: chalk.yellow },
+  3: { label: 'Medium', color: chalk.blue },
+  4: { label: 'Low', color: chalk.gray },
+};
+
+/**
+ * Format a workflow state with appropriate color
+ */
+export function formatState(state: WorkflowState): string {
+  const colorFn = STATE_COLORS[state.type] || chalk.white;
+  return colorFn(state.name);
+}
+
+/**
+ * Format priority with color
+ */
+export function formatPriority(priority: number): string {
+  const config = PRIORITY_MAP[priority] || PRIORITY_MAP[0];
+  return config.color(config.label);
+}
+
+/**
+ * Format an assignee name
+ */
+export function formatAssignee(assignee: User | undefined | null): string {
+  if (!assignee) {
+    return chalk.gray('Unassigned');
+  }
+  return assignee.name || assignee.email;
+}
+
+/**
+ * Format a date for display
+ */
+export function formatDate(date: Date | undefined | null): string {
+  if (!date) {
+    return chalk.gray('-');
+  }
+  return new Date(date).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+/**
+ * Format an issue identifier (e.g., "ENG-123")
+ */
+export function formatIdentifier(identifier: string): string {
+  return chalk.cyan(identifier);
+}
+
+/**
+ * Truncate text to a maximum length
+ */
+export function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.slice(0, maxLength - 3) + '...';
+}
+
+/**
+ * Format an issue for list display (single line)
+ */
+export async function formatIssueRow(issue: Issue): Promise<string> {
+  const state = await issue.state;
+  const assignee = await issue.assignee;
+  
+  const id = formatIdentifier(issue.identifier.padEnd(10));
+  const title = truncate(issue.title, 50).padEnd(52);
+  const stateStr = state ? formatState(state).padEnd(20) : chalk.gray('Unknown').padEnd(20);
+  const assigneeStr = formatAssignee(assignee);
+  
+  return `${id} ${title} ${stateStr} ${assigneeStr}`;
+}
+
+/**
+ * Format a detailed issue view
+ */
+export async function formatIssueDetails(issue: Issue): Promise<string> {
+  const state = await issue.state;
+  const assignee = await issue.assignee;
+  const team = await issue.team;
+  const project = await issue.project;
+  const labels = await issue.labels();
+  
+  const lines: string[] = [];
+  
+  // Header
+  lines.push(chalk.bold(formatIdentifier(issue.identifier) + ' ' + issue.title));
+  lines.push('');
+  
+  // Metadata table
+  lines.push(chalk.gray('Status:    ') + (state ? formatState(state) : chalk.gray('Unknown')));
+  lines.push(chalk.gray('Priority:  ') + formatPriority(issue.priority));
+  lines.push(chalk.gray('Assignee:  ') + formatAssignee(assignee));
+  lines.push(chalk.gray('Team:      ') + (team ? team.name : chalk.gray('-')));
+  
+  if (project) {
+    lines.push(chalk.gray('Project:   ') + project.name);
+  }
+  
+  if (labels.nodes.length > 0) {
+    const labelNames = labels.nodes.map(l => chalk.magenta(l.name)).join(', ');
+    lines.push(chalk.gray('Labels:    ') + labelNames);
+  }
+  
+  lines.push(chalk.gray('Created:   ') + formatDate(issue.createdAt));
+  
+  if (issue.dueDate) {
+    lines.push(chalk.gray('Due:       ') + formatDate(new Date(issue.dueDate)));
+  }
+  
+  // Description
+  if (issue.description) {
+    lines.push('');
+    lines.push(chalk.gray('Description:'));
+    lines.push(issue.description);
+  }
+  
+  // URL
+  lines.push('');
+  lines.push(chalk.gray('URL: ') + chalk.underline(issue.url));
+  
+  return lines.join('\n');
+}
+
+/**
+ * Print a list header
+ */
+export function printListHeader(): void {
+  const header = chalk.bold(
+    'ID'.padEnd(10) + ' ' +
+    'Title'.padEnd(52) + ' ' +
+    'Status'.padEnd(20) + ' ' +
+    'Assignee'
+  );
+  console.log(header);
+  console.log(chalk.gray('-'.repeat(100)));
+}
+
