@@ -24,6 +24,19 @@ const CONFIG_KEYS = {
         description: 'Issue templates (use JSON format)',
         parse: (v) => JSON.parse(v),
     },
+    enableAgentContext: {
+        description: 'Enable workspace context fetching for AI agent (true/false)',
+        validate: (v) => ['true', 'false'].includes(v.toLowerCase()),
+        parse: (v) => v.toLowerCase() === 'true',
+    },
+    agentConfirmation: {
+        description: 'Show confirmation before AI creates issue (true/false)',
+        validate: (v) => ['true', 'false'].includes(v.toLowerCase()),
+        parse: (v) => v.toLowerCase() === 'true',
+    },
+    agentModel: {
+        description: 'Claude model for agent (e.g., claude-haiku-4-5-20251001)',
+    },
 };
 export function registerConfigCommands(program) {
     const config = program

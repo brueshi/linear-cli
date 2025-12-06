@@ -1,6 +1,6 @@
 {
   "name": "@brueshi/linear-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Command line interface for Linear issue management. Create issues, manage workflows, and generate branches without leaving the terminal.",
   "main": "dist/index.js",
   "type": "module",
@@ -11,7 +11,10 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "bun:dev": "bun run src/index.ts",
+    "bun:build": "bun build src/index.ts --outdir dist --target node",
+    "bun:start": "bun dist/index.js"
   },
   "keywords": [
     "linear",
@@ -19,7 +22,10 @@
     "issue-tracker",
     "project-management",
     "developer-tools",
-    "productivity"
+    "productivity",
+    "ai",
+    "claude",
+    "natural-language"
   ],
   "author": "joe bruechner",
   "license": "MIT",
@@ -37,9 +43,12 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CLAUDE.md",
+    "AGENTS.md"
   ],
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
     "@inquirer/prompts": "^8.0.1",
     "@linear/sdk": "^65.0.0",
     "chalk": "^5.6.2",

@@ -1,0 +1,60 @@
+# Linear CLI Integration
+
+This project includes the `linear` CLI for managing Linear issues. Use it to create, update, and track issues during development.
+
+## Quick Commands
+
+Create issue (AI-powered):
+```
+linear agent "<description>" --auto
+```
+
+Update issue status:
+```
+linear issue update <ID> -s "in progress"
+linear issue update <ID> -s done
+```
+
+Close issue:
+```
+linear issue close <ID>
+```
+
+Create git branch:
+```
+linear branch <ID>
+```
+
+List assigned issues:
+```
+linear issue list -a me
+```
+
+## Usage Guidelines
+
+- Use `linear agent` with `--auto` flag for creating issues - it parses natural language automatically
+- Include relevant context in issue descriptions: file names, function names, error messages
+- Update issue status when starting (`in progress`) and completing (`done`) work
+- Check `linear auth status` if commands fail
+
+## Priority Reference
+
+1 = Urgent, 2 = High, 3 = Medium, 4 = Low
+
+## Example Workflows
+
+Starting work on ABC-123:
+```
+linear issue update ABC-123 -s "in progress"
+linear branch ABC-123
+```
+
+Found a bug:
+```
+linear agent "NPE in UserService.getProfile when profile is null, backend, high priority" --auto
+```
+
+Finished work:
+```
+linear issue close ABC-123
+```

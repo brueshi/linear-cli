@@ -23,6 +23,9 @@ export interface Config {
             priority?: number;
         };
     };
+    enableAgentContext?: boolean;
+    agentConfirmation?: boolean;
+    agentModel?: string;
 }
 /**
  * ConfigManager handles user preferences and defaults

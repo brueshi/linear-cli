@@ -6,6 +6,7 @@ import { registerConfigCommands } from './commands/config.js';
 import { registerQuickCommand } from './commands/quick.js';
 import { registerBranchCommand } from './commands/branch.js';
 import { registerCompletionCommand } from './commands/completion.js';
+import { registerAgentCommand } from './commands/agent.js';
 const program = new Command();
 program
     .name('linear')
@@ -17,6 +18,7 @@ Examples:
   $ linear issue list -t ENG             # List issues for team ENG
   $ linear issue create                  # Create issue interactively
   $ linear quick "Fix login bug"         # Quick issue creation
+  $ linear agent "Fix auth bug, urgent"  # AI-powered issue creation
   $ linear branch ENG-123                # Create branch for issue
   $ linear config set defaultTeam ENG    # Set default team
 
@@ -30,6 +32,7 @@ registerConfigCommands(program);
 registerQuickCommand(program);
 registerBranchCommand(program);
 registerCompletionCommand(program);
+registerAgentCommand(program);
 // Handle unknown commands gracefully
 program.on('command:*', (operands) => {
     console.error(`error: unknown command '${operands[0]}'`);

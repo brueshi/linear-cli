@@ -18,6 +18,24 @@ export declare class ValidationError extends LinearCliError {
 export declare class NetworkError extends LinearCliError {
     constructor(message?: string);
 }
+export declare class AnthropicAuthError extends LinearCliError {
+    constructor();
+}
+export declare class AIExtractionError extends LinearCliError {
+    constructor(message?: string);
+}
+export declare class AIRateLimitError extends LinearCliError {
+    constructor();
+}
+export declare class AITimeoutError extends LinearCliError {
+    constructor();
+}
+export declare class TeamNotFoundError extends LinearCliError {
+    constructor(teamKey: string, availableTeams: string[]);
+}
+export declare class AgentValidationError extends LinearCliError {
+    constructor(errors: string[], suggestions?: string[]);
+}
 /**
  * Handle errors consistently across the CLI
  */

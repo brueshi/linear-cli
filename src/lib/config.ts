@@ -27,6 +27,11 @@ export interface Config {
     feature?: { title?: string; description?: string; priority?: number };
     task?: { title?: string; description?: string; priority?: number };
   };
+  
+  // Agent settings
+  enableAgentContext?: boolean;   // Default: true - fetch workspace context for AI
+  agentConfirmation?: boolean;    // Default: true - show confirmation before creating
+  agentModel?: string;            // Default: claude-haiku-4-5-20251001
 }
 
 /**
