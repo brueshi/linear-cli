@@ -1,8 +1,9 @@
 import { Command } from 'commander';
-import { select, input, editor } from '@inquirer/prompts';
+import { select, input, editor, checkbox } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { LinearClient, Issue } from '@linear/sdk';
 import { getAuthenticatedClient } from '../lib/client.js';
+import { resolveOrCreateLabels, parseLabels } from '../lib/agent/labels.js';
 import {
   formatIssueRow,
   formatIssueDetails,
@@ -45,6 +46,30 @@ async function findIssueByIdentifier(client: LinearClient, identifier: string): 
       first: 1,
     });
     return issues.nodes[0] || null;
+  }
+  
+  return null;
+}
+
+/**
+ * Find a project by name or ID
+ */
+async function findProject(client: LinearClient, nameOrId: string): Promise<{ id: string; name: string } | null> {
+  const projects = await client.projects({
+    filter: {
+      or: [
+        { name: { containsIgnoreCase: nameOrId } },
+        { id: { eq: nameOrId } },
+      ],
+    },
+    first: 1,
+  });
+  
+  if (projects.nodes.length > 0) {
+    return {
+      id: projects.nodes[0].id,
+      name: projects.nodes[0].name,
+    };
   }
   
   return null;
@@ -127,6 +152,8 @@ export function registerIssueCommands(program: Command): void {
     .option('--title <title>', 'Issue title')
     .option('--description <description>', 'Issue description')
     .option('-p, --priority <priority>', 'Priority (1=Urgent, 2=High, 3=Medium, 4=Low)')
+    .option('--project <project>', 'Project name or ID')
+    .option('--label <labels>', 'Labels (comma-separated)')
     .action(async (options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -159,6 +186,41 @@ export function registerIssueCommands(program: Command): void {
             })),
           });
           teamId = teamChoice;
+        }
+        
+        // Fetch projects for the selected team
+        const allProjects = await client.projects({ first: 100 });
+        const teamProjects: Array<{ id: string; name: string }> = [];
+        
+        for (const proj of allProjects.nodes) {
+          const projTeams = await proj.teams();
+          if (projTeams.nodes.some(t => t.id === teamId)) {
+            teamProjects.push({ id: proj.id, name: proj.name });
+          }
+        }
+        
+        // Select project (or use provided)
+        let projectId: string | undefined;
+        
+        if (options.project) {
+          const project = await findProject(client, options.project);
+          if (project) {
+            projectId = project.id;
+          } else {
+            console.log(chalk.yellow(`Project "${options.project}" not found, skipping.`));
+          }
+        } else if (teamProjects.length > 0) {
+          const projectChoice = await select({
+            message: 'Assign to project (optional):',
+            choices: [
+              { name: 'None', value: '' },
+              ...teamProjects.map(p => ({
+                name: p.name,
+                value: p.id,
+              })),
+            ],
+          });
+          projectId = projectChoice || undefined;
         }
         
         // Get title
@@ -209,6 +271,37 @@ export function registerIssueCommands(program: Command): void {
           priority = priorityChoice;
         }
         
+        // Handle labels
+        let labelIds: string[] | undefined;
+        const existingLabels = await client.issueLabels({ first: 100 });
+        const labelContext = existingLabels.nodes.map(l => ({ id: l.id, name: l.name }));
+        
+        if (options.label) {
+          // Parse command line labels and resolve/create them
+          const labelNames = parseLabels(options.label);
+          if (labelNames.length > 0) {
+            const result = await resolveOrCreateLabels(client, labelNames, labelContext, teamId);
+            labelIds = result.labelIds;
+            
+            if (result.createdLabels.length > 0) {
+              console.log(chalk.gray(`Created labels: ${result.createdLabels.join(', ')}`));
+            }
+          }
+        } else if (labelContext.length > 0) {
+          // Interactive label selection
+          const selectedLabels = await checkbox({
+            message: 'Select labels (optional):',
+            choices: labelContext.map(l => ({
+              name: l.name,
+              value: l.id,
+            })),
+          });
+          
+          if (selectedLabels.length > 0) {
+            labelIds = selectedLabels;
+          }
+        }
+        
         // Create the issue
         console.log(chalk.gray('Creating issue...'));
         
@@ -217,6 +310,8 @@ export function registerIssueCommands(program: Command): void {
           title: title.trim(),
           description: description?.trim() || undefined,
           priority: priority || undefined,
+          projectId,
+          labelIds,
         });
         
         const createdIssue = await issuePayload.issue;
@@ -283,6 +378,9 @@ export function registerIssueCommands(program: Command): void {
     .option('-p, --priority <priority>', 'Priority (1=Urgent, 2=High, 3=Medium, 4=Low)')
     .option('-s, --status <status>', 'New status name')
     .option('-a, --assignee <assignee>', 'Assign to user (use "me" for yourself, "none" to unassign)')
+    .option('--project <project>', 'Move to project (use "none" to remove from project)')
+    .option('--label <labels>', 'Set labels (comma-separated, replaces existing)')
+    .option('--add-label <labels>', 'Add labels (comma-separated)')
     .action(async (id: string, options) => {
       const client = await getAuthenticatedClient();
       
@@ -345,6 +443,64 @@ export function registerIssueCommands(program: Command): void {
               console.log(chalk.red(`User "${options.assignee}" not found.`));
               process.exit(1);
             }
+          }
+        }
+        
+        // Handle project update
+        if (options.project) {
+          if (options.project.toLowerCase() === 'none') {
+            updateData.projectId = null;
+          } else {
+            const project = await findProject(client, options.project);
+            if (project) {
+              updateData.projectId = project.id;
+            } else {
+              console.log(chalk.red(`Project "${options.project}" not found.`));
+              process.exit(1);
+            }
+          }
+        }
+        
+        // Handle label updates
+        if (options.label || options.addLabel) {
+          const team = await issue.team;
+          const teamId = team?.id;
+          
+          if (!teamId) {
+            console.log(chalk.red('Could not determine team for label update.'));
+            process.exit(1);
+          }
+          
+          const existingLabels = await client.issueLabels({ first: 100 });
+          const labelContext = existingLabels.nodes.map(l => ({ id: l.id, name: l.name }));
+          
+          if (options.label) {
+            // Replace all labels
+            const labelNames = parseLabels(options.label);
+            if (labelNames.length > 0) {
+              const result = await resolveOrCreateLabels(client, labelNames, labelContext, teamId);
+              updateData.labelIds = result.labelIds;
+              
+              if (result.createdLabels.length > 0) {
+                console.log(chalk.gray(`Created labels: ${result.createdLabels.join(', ')}`));
+              }
+            } else {
+              updateData.labelIds = [];
+            }
+          } else if (options.addLabel) {
+            // Add labels to existing
+            const currentLabels = await issue.labels();
+            const currentLabelIds = currentLabels.nodes.map(l => l.id);
+            
+            const labelNames = parseLabels(options.addLabel);
+            const result = await resolveOrCreateLabels(client, labelNames, labelContext, teamId);
+            
+            if (result.createdLabels.length > 0) {
+              console.log(chalk.gray(`Created labels: ${result.createdLabels.join(', ')}`));
+            }
+            
+            // Merge with existing labels
+            updateData.labelIds = [...new Set([...currentLabelIds, ...result.labelIds])];
           }
         }
         

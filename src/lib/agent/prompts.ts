@@ -11,7 +11,7 @@ Your task is to parse the user's input and extract the following fields:
 - teamKey: Team identifier if mentioned (e.g., ATT, FE, BE, OPS, backend, frontend)
 - priority: 0=No priority, 1=Urgent, 2=High, 3=Medium, 4=Low
 - estimate: Story points (1, 2, 3, 5, 8, 13, 21) if mentioned
-- labels: Array of relevant labels extracted from technical terms
+- labels: Array of relevant labels - prefer existing workspace labels when available
 - issueType: bug, feature, improvement, or task
 - dueDate: ISO date string if a deadline is mentioned
 
@@ -29,7 +29,11 @@ Guidelines:
    - Medium (3): medium, normal, P2
    - Low (4): low priority, when possible, nice to have, P3, P4
 5. Keep titles concise (under 80 characters) and action-oriented
-6. Extract technical terms as potential labels (e.g., auth, api, database, frontend, backend, performance, security)
+6. For labels:
+   - STRONGLY prefer using labels from the workspace's existing labels list
+   - Match existing labels case-insensitively (e.g., if "API" exists, use "API" not "api")
+   - Only suggest new labels if the concept is clearly distinct from existing ones
+   - Extract from technical terms like: auth, api, database, frontend, backend, performance, security
 7. Map team mentions to common patterns:
    - backend, BE, server, api -> likely backend team
    - frontend, FE, UI, client -> likely frontend team
@@ -62,11 +66,22 @@ export function buildContextPrompt(context: WorkspaceContext): string {
     lines.push('');
   }
   
-  // Add common labels
+  // Add available projects
+  if (context.projects.length > 0) {
+    lines.push('Available projects in this workspace:');
+    for (const project of context.projects.slice(0, 10)) {
+      lines.push(`- ${project.name}`);
+    }
+    lines.push('');
+  }
+  
+  // Add existing labels - emphasize these should be preferred
   if (context.labels.length > 0) {
-    lines.push('Common labels (use these when applicable):');
-    const labelNames = context.labels.slice(0, 20).map(l => l.name);
+    lines.push('EXISTING LABELS (prefer these over creating new ones):');
+    const labelNames = context.labels.slice(0, 30).map(l => l.name);
     lines.push(labelNames.join(', '));
+    lines.push('');
+    lines.push('Note: Use these exact label names when they match the issue context. New labels can be created if needed, but existing ones are preferred.');
     lines.push('');
   }
   

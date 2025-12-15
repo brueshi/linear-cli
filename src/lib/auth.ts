@@ -1,18 +1,22 @@
-import keytar from 'keytar';
+import { secrets } from './secrets.js';
 
 const SERVICE_NAME = 'linear-cli';
 const ACCOUNT_NAME = 'api-key';
 
 /**
  * AuthManager handles secure storage and retrieval of Linear API keys
- * using the macOS Keychain via keytar.
+ * using the system's native credential storage.
+ * 
+ * Uses Bun.secrets when running under Bun, keytar for Node.js.
+ * Both use the same underlying OS keychain APIs, so credentials
+ * are interoperable between runtimes.
  */
 export const AuthManager = {
   /**
    * Store an API key securely in the system keychain
    */
   async saveApiKey(apiKey: string): Promise<void> {
-    await keytar.setPassword(SERVICE_NAME, ACCOUNT_NAME, apiKey);
+    await secrets.set(SERVICE_NAME, ACCOUNT_NAME, apiKey);
   },
 
   /**
@@ -20,7 +24,7 @@ export const AuthManager = {
    * @returns The API key if found, null otherwise
    */
   async getApiKey(): Promise<string | null> {
-    return keytar.getPassword(SERVICE_NAME, ACCOUNT_NAME);
+    return secrets.get(SERVICE_NAME, ACCOUNT_NAME);
   },
 
   /**
@@ -28,7 +32,7 @@ export const AuthManager = {
    * @returns true if a key was deleted, false if no key existed
    */
   async deleteApiKey(): Promise<boolean> {
-    return keytar.deletePassword(SERVICE_NAME, ACCOUNT_NAME);
+    return secrets.delete(SERVICE_NAME, ACCOUNT_NAME);
   },
 
   /**
@@ -39,4 +43,3 @@ export const AuthManager = {
     return key !== null;
   },
 };
-

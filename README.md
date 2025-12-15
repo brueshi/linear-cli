@@ -8,6 +8,35 @@ A command line interface for [Linear](https://linear.app) issue management. Crea
 npm install -g @brueshi/linear-cli
 ```
 
+### Alternative: Install with Bun
+
+For faster startup times (~5-10x faster), you can use [Bun](https://bun.sh) instead of Node.js:
+
+```bash
+# Install globally with Bun
+bun install -g @brueshi/linear-cli
+
+# Or run directly from source
+git clone https://github.com/brueshi/linear-cli.git
+cd linear-cli
+bun install
+bun run src/index.ts
+```
+
+### Standalone Binary (No Runtime Required)
+
+Build a standalone executable with Bun:
+
+```bash
+git clone https://github.com/brueshi/linear-cli.git
+cd linear-cli
+bun install
+bun run bun:compile
+
+# Move to your PATH
+sudo mv linear-bun /usr/local/bin/linear
+```
+
 ## Quick Start
 
 ```bash
@@ -19,6 +48,10 @@ linear issue list
 
 # Create an issue quickly
 linear quick "Fix the login bug"
+
+# List projects and labels
+linear project list
+linear label list
 
 # AI-powered issue creation (requires Anthropic API key)
 linear agent "Fix auth token refresh in Safari, backend team, urgent"
@@ -62,6 +95,12 @@ linear issue view ATT-123            # View issue details
 linear issue update ATT-123 -s done  # Update status
 linear issue update ATT-123 -a me    # Assign to yourself
 linear issue close ATT-123           # Mark as completed
+
+# Project and label management
+linear issue update ATT-123 --project "Q1 Roadmap"    # Assign to project
+linear issue update ATT-123 --project none            # Remove from project
+linear issue update ATT-123 --label "bug,api"         # Set labels
+linear issue update ATT-123 --add-label "urgent"      # Add labels
 ```
 
 ### Quick Create
@@ -72,6 +111,8 @@ Create issues with minimal input:
 linear quick "Fix login bug"                    # Basic
 linear quick "Urgent fix" -p 1                  # With priority (1=Urgent)
 linear quick "New feature" -t ATT -d "Details"  # With team and description
+linear quick "API bug" --project "Q1 Roadmap"   # Assign to project
+linear quick "Bug fix" --label "bug,api"        # With labels (auto-created if needed)
 ```
 
 ### AI-Powered Issue Creation
@@ -103,6 +144,9 @@ linear agent "Add dark mode support to dashboard" --dry-run
 # Override AI detection
 linear agent "Performance issue" --team FE --priority 2
 
+# Assign to project
+linear agent "New feature" --auto --project "Q1 Roadmap"
+
 # Assign to yourself
 linear agent "Update documentation" --auto --assign-to-me
 ```
@@ -114,7 +158,7 @@ linear agent "Update documentation" --auto --assign-to-me
 | `--auto` | `-a` | Skip confirmation, create immediately |
 | `--dry-run` | `-d` | Show extracted data without creating issue |
 | `--team <key>` | `-t` | Override AI team detection |
-| `--project <id>` | `-p` | Override AI project detection |
+| `--project <name>` | `-p` | Assign to project by name |
 | `--priority <0-4>` | `-P` | Override AI priority (1=Urgent, 4=Low) |
 | `--assign-to-me` | `-m` | Assign the issue to yourself |
 | `--no-context` | | Disable workspace context fetching |
@@ -152,6 +196,40 @@ Branch styles:
 - `feature` (default): `feature/att-123-fix-login-bug`
 - `kebab`: `att-123-fix-login-bug`
 - `plain`: `att-123/fix-login-bug`
+
+### Projects
+
+Manage Linear projects:
+
+```bash
+# List projects
+linear project list                  # List all projects
+linear project list -t ATT           # Filter by team
+linear project list -s started       # Filter by state (planned, started, paused, completed, canceled)
+
+# View project details
+linear project view "Q1 Roadmap"     # View project by name
+
+# Create projects
+linear project create "New Project" -t ATT
+linear project create "Q2 Roadmap" -t ATT --start-date 2024-04-01 --target-date 2024-06-30
+```
+
+### Labels
+
+Manage workspace labels:
+
+```bash
+# List labels
+linear label list                    # List all labels
+linear label list -t ATT             # Filter by team
+
+# Create labels
+linear label create "bug" -t ATT                 # Create with team
+linear label create "urgent" -t ATT -c "#FF0000" # With custom color
+```
+
+Labels are automatically created when referenced in issue creation if they don't exist.
 
 ### Configuration
 
@@ -240,9 +318,17 @@ feature "Add export to CSV, frontend"
 
 ## Requirements
 
-- Node.js 20 or higher
+- Node.js 20+ **or** Bun 1.0+
 - A Linear account with API access
 - (Optional) Anthropic API key for the `agent` command
+
+### Runtime Comparison
+
+| Runtime | Startup Time | Installation |
+|---------|-------------|--------------|
+| Node.js | ~200-300ms | `npm install -g` |
+| Bun | ~30-50ms | `bun install -g` |
+| Standalone | ~20-40ms | Pre-compiled binary |
 
 ## License
 

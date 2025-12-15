@@ -11,6 +11,7 @@ import { IssueParser } from '../lib/agent/issue-parser.js';
 import { Validator } from '../lib/agent/validator.js';
 import { BatchProcessor, parseBatchInput } from '../lib/agent/batch-processor.js';
 import { TemplateManager } from '../lib/agent/templates.js';
+import { resolveOrCreateLabels } from '../lib/agent/labels.js';
 import type { ExtractedIssueData, AgentOptions, WorkspaceContext } from '../lib/agent/types.js';
 import { formatIdentifier } from '../utils/format.js';
 
@@ -58,7 +59,7 @@ function wordWrap(text: string, maxWidth: number): string[] {
 /**
  * Format a preview showing extracted issue data
  */
-function formatPreviewBox(data: ExtractedIssueData, teamName?: string): string {
+function formatPreviewBox(data: ExtractedIssueData, teamName?: string, projectName?: string): string {
   const lines: string[] = [];
   
   const addRow = (label: string, value: string) => {
@@ -69,6 +70,10 @@ function formatPreviewBox(data: ExtractedIssueData, teamName?: string): string {
   
   if (data.teamKey || teamName) {
     addRow('Team:', teamName ? `${teamName} (${data.teamKey})` : data.teamKey || '-');
+  }
+  
+  if (projectName) {
+    addRow('Project:', projectName);
   }
   
   if (data.issueType) {
@@ -196,6 +201,19 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       }
     }
 
+    // Validate --assign-to-me requires context
+    if (options.assignToMe && !context) {
+      console.log(chalk.red('Cannot use --assign-to-me without workspace context.'));
+      console.log('');
+      console.log('The --assign-to-me flag requires workspace context to determine your user ID.');
+      if (options.context === false) {
+        console.log('Remove the ' + chalk.cyan('--no-context') + ' flag, or assign manually after creation.');
+      } else {
+        console.log('Check your network connection and try again.');
+      }
+      process.exit(1);
+    }
+
     // Handle batch mode
     if (options.batch) {
       if (!context) {
@@ -305,18 +323,18 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
     if (context) {
       validationResult = validator.validate(extracted, context);
       
-      // Show warnings
+      // Show warnings (but skip label warnings since we'll auto-create)
       for (const warning of validationResult.warnings) {
-        console.log(chalk.yellow('Warning: ') + warning);
+        if (!warning.includes('Labels not found')) {
+          console.log(chalk.yellow('Warning: ') + warning);
+        }
       }
       
       // Apply enriched data
       if (validationResult.enriched.teamId) {
         extracted.teamId = validationResult.enriched.teamId;
       }
-      if (validationResult.enriched.labels) {
-        extracted.labels = validationResult.enriched.labels;
-      }
+      // Don't override labels from validator - we'll auto-create missing ones
     }
     
     // 10. Parse into Linear format
@@ -324,9 +342,9 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
     if (context) {
       parseResult = issueParser.parse(extracted, context, config);
       
-      // Show parse warnings
+      // Show parse warnings (skip label warnings)
       for (const warning of parseResult.warnings) {
-        if (!validationResult?.warnings.includes(warning)) {
+        if (!validationResult?.warnings.includes(warning) && !warning.includes('Labels not found')) {
           console.log(chalk.yellow('Warning: ') + warning);
         }
       }
@@ -388,13 +406,59 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       }
     }
     
-    // 11. Dry run - just show extraction
+    // 11. Project selection
+    let projectId = extracted.projectId;
+    let projectName: string | undefined;
+    
+    // If project specified via flag, try to resolve it
+    if (options.project && context) {
+      const project = context.projects.find(p => 
+        p.id === options.project || 
+        p.name.toLowerCase().includes(options.project!.toLowerCase())
+      );
+      if (project) {
+        projectId = project.id;
+        projectName = project.name;
+      }
+    }
+    
+    // Prompt for project selection if not in auto mode and we have a team
+    if (!projectId && teamId && context && !options.auto && !options.dryRun) {
+      // Filter projects by team
+      const teamProjects = context.projects.filter(p => 
+        p.teamIds.includes(teamId!)
+      );
+      
+      if (teamProjects.length > 0) {
+        const projectChoice = await select({
+          message: 'Assign to project (optional):',
+          choices: [
+            { name: 'None', value: '' },
+            ...teamProjects.map(p => ({
+              name: p.name,
+              value: p.id,
+            })),
+          ],
+        });
+        
+        if (projectChoice) {
+          projectId = projectChoice;
+          const selectedProject = teamProjects.find(p => p.id === projectChoice);
+          if (selectedProject) {
+            projectName = selectedProject.name;
+          }
+        }
+      }
+    }
+    
+    // 12. Dry run - just show extraction
     if (options.dryRun) {
       console.log('');
       console.log(chalk.cyan('Extracted Data:'));
       console.log(JSON.stringify({
         title: extracted.title,
         teamKey: teamKey || null,
+        projectId: projectId || null,
         issueType: extracted.issueType || null,
         priority: extracted.priority ?? null,
         description: extracted.description || null,
@@ -406,7 +470,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       return;
     }
     
-    // 12. Verify we have a team
+    // 13. Verify we have a team
     if (!teamId) {
       console.log(chalk.red('Could not determine team for this issue.'));
       if (context && context.teams.length > 0) {
@@ -416,12 +480,12 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       process.exit(1);
     }
     
-    // 13. Prompt for additional details (unless --auto)
+    // 14. Prompt for additional details (unless --auto)
     const skipConfirmation = options.auto || config.agentConfirmation === false;
     
     if (!skipConfirmation) {
       console.log('');
-      console.log(formatPreviewBox(extracted, teamName));
+      console.log(formatPreviewBox(extracted, teamName, projectName));
       console.log('');
       
       // Prompt for additional description details
@@ -440,7 +504,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
         
         // Refresh the preview with updated description
         console.log('');
-        console.log(formatPreviewBox(extracted, teamName));
+        console.log(formatPreviewBox(extracted, teamName, projectName));
         console.log('');
       }
       
@@ -455,20 +519,26 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       }
     }
     
-    // 14. Resolve labels to IDs
+    // 15. Resolve labels to IDs (auto-creating missing ones)
     let labelIds: string[] | undefined;
+    let createdLabels: string[] = [];
+    
     if (extracted.labels && extracted.labels.length > 0 && context) {
-      const resolvedLabels = context.labels.filter(l =>
-        extracted.labels!.some(name => 
-          l.name.toLowerCase() === name.toLowerCase()
-        )
+      const result = await resolveOrCreateLabels(
+        linearClient,
+        extracted.labels,
+        context.labels,
+        teamId
       );
-      if (resolvedLabels.length > 0) {
-        labelIds = resolvedLabels.map(l => l.id);
+      
+      if (result.labelIds.length > 0) {
+        labelIds = result.labelIds;
       }
+      
+      createdLabels = result.createdLabels;
     }
     
-    // 15. Create issue in Linear
+    // 16. Create issue in Linear
     const issuePayload = await linearClient.createIssue({
       teamId,
       title: extracted.title,
@@ -476,6 +546,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       priority: extracted.priority,
       estimate: extracted.estimate,
       labelIds,
+      projectId,
       assigneeId: options.assignToMe ? context?.user.id : undefined,
       parentId: options.parent,
     });
@@ -522,6 +593,11 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       );
       console.log(chalk.gray('  ' + createdIssue.url));
       
+      // Show created labels
+      if (createdLabels.length > 0) {
+        console.log(chalk.gray(`  Created labels: ${createdLabels.join(', ')}`));
+      }
+      
       // Suggest git branch
       const branchName = createdIssue.identifier.toLowerCase() + '-' + 
         createdIssue.title.toLowerCase()
@@ -556,7 +632,7 @@ export function registerAgentCommand(program: Command): void {
     .option('-a, --auto', 'Skip confirmation, create immediately')
     .option('-d, --dry-run', 'Show extraction without creating issue')
     .option('-t, --team <key>', 'Override AI team detection')
-    .option('-p, --project <id>', 'Override AI project detection')
+    .option('-p, --project <name>', 'Assign to project (name or ID)')
     .option('-P, --priority <0-4>', 'Override AI priority detection')
     .option('-m, --assign-to-me', 'Assign issue to authenticated user')
     .option('--no-context', 'Disable workspace context fetching')
@@ -572,6 +648,10 @@ Examples:
   $ linear agent "Performance issue in dashboard" --dry-run
   $ linear agent "Critical auth failure" --auto --assign-to-me
 
+Projects:
+  $ linear agent "New feature" --project "Q1 Roadmap"
+  $ linear agent "Bug fix" -p "Backend Refactor"
+
 Templates:
   $ linear agent "login validation" --template bug
   $ linear agent "user export feature" --template feature
@@ -585,6 +665,7 @@ Batch mode:
 
 The agent uses AI to extract structured issue data from your input.
 It analyzes your workspace to suggest teams, labels, and priorities.
+Labels mentioned will be auto-created if they don't exist.
     `)
     .action(agentAction);
 

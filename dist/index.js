@@ -7,6 +7,8 @@ import { registerQuickCommand } from './commands/quick.js';
 import { registerBranchCommand } from './commands/branch.js';
 import { registerCompletionCommand } from './commands/completion.js';
 import { registerAgentCommand } from './commands/agent.js';
+import { registerProjectCommands } from './commands/project.js';
+import { registerLabelCommands } from './commands/label.js';
 const program = new Command();
 program
     .name('linear')
@@ -20,14 +22,18 @@ Examples:
   $ linear quick "Fix login bug"         # Quick issue creation
   $ linear agent "Fix auth bug, urgent"  # AI-powered issue creation
   $ linear branch ENG-123                # Create branch for issue
+  $ linear project list                  # List projects
+  $ linear label list                    # List labels
   $ linear config set defaultTeam ENG    # Set default team
 
 Documentation:
-  https://github.com/your-username/linear-cli
+  https://github.com/brueshi/linear-cli
 `);
 // Register command groups
 registerAuthCommands(program);
 registerIssueCommands(program);
+registerProjectCommands(program);
+registerLabelCommands(program);
 registerConfigCommands(program);
 registerQuickCommand(program);
 registerBranchCommand(program);

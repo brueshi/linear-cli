@@ -1,6 +1,10 @@
 /**
  * AuthManager handles secure storage and retrieval of Linear API keys
- * using the macOS Keychain via keytar.
+ * using the system's native credential storage.
+ *
+ * Uses Bun.secrets when running under Bun, keytar for Node.js.
+ * Both use the same underlying OS keychain APIs, so credentials
+ * are interoperable between runtimes.
  */
 export declare const AuthManager: {
     /**
