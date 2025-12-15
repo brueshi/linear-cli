@@ -27,7 +27,7 @@ Examples:
   $ linear config set defaultTeam ENG    # Set default team
 
 Documentation:
-  https://github.com/brueshi/linear-cli
+  https://github.com/your-username/linear-cli
 `);
 // Register command groups
 registerAuthCommands(program);
