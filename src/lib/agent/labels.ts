@@ -2,6 +2,18 @@ import type { LinearClient } from '@linear/sdk';
 import chalk from 'chalk';
 
 /**
+ * Convert a label name to title case (capitalize first letter of each word)
+ * Examples: "backend" -> "Backend", "api integration" -> "Api Integration"
+ */
+function toTitleCase(str: string): string {
+  return str
+    .trim()
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
  * Result of label resolution
  */
 export interface LabelResolutionResult {
@@ -46,10 +58,11 @@ export async function resolveOrCreateLabels(
       result.labelIds.push(existing.id);
       result.existingLabels.push(existing.name);
     } else {
-      // Create the label
+      // Create the label with title case formatting
+      const titleCaseName = toTitleCase(name);
       try {
         const payload = await client.createIssueLabel({
-          name: name.trim(),
+          name: titleCaseName,
           teamId,
         });
         const label = await payload.issueLabel;
@@ -62,7 +75,7 @@ export async function resolveOrCreateLabels(
         // or if the name is invalid - try to fetch it
         try {
           const labels = await client.issueLabels({
-            filter: { name: { eq: name.trim() } },
+            filter: { name: { eq: titleCaseName } },
             first: 1,
           });
           if (labels.nodes.length > 0) {
@@ -71,7 +84,7 @@ export async function resolveOrCreateLabels(
           }
         } catch {
           // Silently skip labels that can't be created or found
-          console.log(chalk.yellow(`Warning: Could not create or find label "${name}"`));
+          console.log(chalk.yellow(`Warning: Could not create or find label "${titleCaseName}"`));
         }
       }
     }

@@ -303,9 +303,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
     if (options.team) {
       extracted.teamKey = options.team.toUpperCase();
     }
-    if (options.project) {
-      extracted.projectId = options.project;
-    }
+    // Note: project is resolved later via API lookup, not stored in extracted
     if (options.priority) {
       const p = parseInt(options.priority, 10);
       if (p >= 0 && p <= 4) {
@@ -407,18 +405,45 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
     }
     
     // 11. Project selection
-    let projectId = extracted.projectId;
+    let projectId: string | undefined;
     let projectName: string | undefined;
-    
+
     // If project specified via flag, try to resolve it
-    if (options.project && context) {
-      const project = context.projects.find(p => 
-        p.id === options.project || 
-        p.name.toLowerCase().includes(options.project!.toLowerCase())
-      );
-      if (project) {
-        projectId = project.id;
-        projectName = project.name;
+    if (options.project) {
+      // First try to find in cached context
+      if (context) {
+        const project = context.projects.find(p =>
+          p.id === options.project ||
+          p.name.toLowerCase().includes(options.project!.toLowerCase())
+        );
+        if (project) {
+          projectId = project.id;
+          projectName = project.name;
+        }
+      }
+
+      // If not found in context, search via API (like quick command does)
+      if (!projectId) {
+        try {
+          const projects = await linearClient.projects({
+            filter: {
+              or: [
+                { name: { containsIgnoreCase: options.project } },
+                { id: { eq: options.project } },
+              ],
+            },
+            first: 1,
+          });
+
+          if (projects.nodes.length > 0) {
+            projectId = projects.nodes[0].id;
+            projectName = projects.nodes[0].name;
+          } else {
+            console.log(chalk.yellow(`Project "${options.project}" not found, skipping.`));
+          }
+        } catch {
+          console.log(chalk.yellow(`Could not search for project "${options.project}", skipping.`));
+        }
       }
     }
     
