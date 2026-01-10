@@ -476,22 +476,124 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       }
     }
     
-    // 12. Dry run - just show extraction
+    // 12. Dry run - show detailed extraction with resolution info
     if (options.dryRun) {
       console.log('');
-      console.log(chalk.cyan('Extracted Data:'));
-      console.log(JSON.stringify({
-        title: extracted.title,
-        teamKey: teamKey || null,
-        projectId: projectId || null,
-        issueType: extracted.issueType || null,
-        priority: extracted.priority ?? null,
-        description: extracted.description || null,
-        labels: extracted.labels || null,
-        estimate: extracted.estimate || null,
-      }, null, 2));
+      console.log(chalk.bold.cyan('Dry Run - Extracted Issue Data'));
+      console.log(chalk.gray('─'.repeat(50)));
       console.log('');
-      console.log(chalk.gray('(No issue created - dry run mode)'));
+
+      // Title
+      console.log(chalk.gray('Title:       ') + chalk.white(extracted.title));
+
+      // Team - show resolved name
+      if (teamId && teamName) {
+        console.log(chalk.gray('Team:        ') + chalk.green(`${teamName} (${teamKey})`) + chalk.gray(' ✓ resolved'));
+      } else if (teamKey) {
+        console.log(chalk.gray('Team:        ') + chalk.yellow(`${teamKey}`) + chalk.gray(' (will attempt to resolve)'));
+      } else if (config.defaultTeam) {
+        console.log(chalk.gray('Team:        ') + chalk.blue(`${config.defaultTeam}`) + chalk.gray(' (from config default)'));
+      } else {
+        console.log(chalk.gray('Team:        ') + chalk.red('Not specified') + chalk.gray(' (will prompt)'));
+      }
+
+      // Project - show resolved name
+      if (projectId && projectName) {
+        console.log(chalk.gray('Project:     ') + chalk.green(projectName) + chalk.gray(' ✓ resolved'));
+      } else if (options.project) {
+        console.log(chalk.gray('Project:     ') + chalk.yellow(options.project) + chalk.gray(' (will search)'));
+      } else {
+        console.log(chalk.gray('Project:     ') + chalk.gray('None'));
+      }
+
+      // Issue Type
+      if (extracted.issueType) {
+        const typeColors: Record<string, (s: string) => string> = {
+          bug: chalk.red,
+          feature: chalk.green,
+          improvement: chalk.blue,
+          task: chalk.gray,
+        };
+        const colorFn = typeColors[extracted.issueType] || chalk.white;
+        console.log(chalk.gray('Type:        ') + colorFn(extracted.issueType.charAt(0).toUpperCase() + extracted.issueType.slice(1)));
+      }
+
+      // Priority
+      if (extracted.priority !== undefined && extracted.priority > 0) {
+        const priorityLabels = ['None', 'Urgent', 'High', 'Medium', 'Low'];
+        const priorityColors = [chalk.gray, chalk.red, chalk.yellow, chalk.blue, chalk.gray];
+        console.log(chalk.gray('Priority:    ') + priorityColors[extracted.priority](priorityLabels[extracted.priority]));
+      }
+
+      // Estimate
+      if (extracted.estimate) {
+        console.log(chalk.gray('Estimate:    ') + `${extracted.estimate} points`);
+      }
+
+      // Labels - show which exist vs will be created
+      if (extracted.labels && extracted.labels.length > 0 && context) {
+        const existingLabelNames = context.labels.map(l => l.name.toLowerCase());
+        const matchedLabels: string[] = [];
+        const newLabels: string[] = [];
+
+        for (const label of extracted.labels) {
+          if (existingLabelNames.includes(label.toLowerCase())) {
+            matchedLabels.push(label);
+          } else {
+            newLabels.push(label);
+          }
+        }
+
+        console.log(chalk.gray('Labels:'));
+        if (matchedLabels.length > 0) {
+          console.log(chalk.gray('  Existing:  ') + chalk.green(matchedLabels.join(', ')) + chalk.gray(' ✓'));
+        }
+        if (newLabels.length > 0) {
+          console.log(chalk.gray('  To create: ') + chalk.yellow(newLabels.join(', ')) + chalk.gray(' (will be created)'));
+        }
+      } else if (extracted.labels && extracted.labels.length > 0) {
+        console.log(chalk.gray('Labels:      ') + extracted.labels.join(', '));
+      }
+
+      // Assignee
+      if (options.assignToMe && context) {
+        console.log(chalk.gray('Assignee:    ') + chalk.green(context.user.name || context.user.email) + chalk.gray(' (you)'));
+      }
+
+      // Parent issue
+      if (options.parent) {
+        console.log(chalk.gray('Parent:      ') + formatIdentifier(options.parent));
+      }
+
+      // Description
+      if (extracted.description) {
+        console.log('');
+        console.log(chalk.gray('Description:'));
+        const lines = extracted.description.split('\n');
+        for (const line of lines.slice(0, 10)) {
+          console.log(chalk.gray('  ') + line);
+        }
+        if (lines.length > 10) {
+          console.log(chalk.gray(`  ... and ${lines.length - 10} more lines`));
+        }
+      }
+
+      // Validation warnings
+      if (validationResult && validationResult.warnings.length > 0) {
+        const relevantWarnings = validationResult.warnings.filter(w => !w.includes('Labels not found'));
+        if (relevantWarnings.length > 0) {
+          console.log('');
+          console.log(chalk.yellow('Warnings:'));
+          for (const warning of relevantWarnings) {
+            console.log(chalk.yellow(`  - ${warning}`));
+          }
+        }
+      }
+
+      console.log('');
+      console.log(chalk.gray('─'.repeat(50)));
+      console.log(chalk.gray('No issue created (dry run mode)'));
+      console.log(chalk.gray('Remove --dry-run or -d to create the issue.'));
       return;
     }
     

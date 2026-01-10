@@ -1,12 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ExtractedIssueData, WorkspaceContext, AIClientConfig } from './types.js';
 import { SYSTEM_PROMPT, buildUserPrompt, sanitizeInput } from './prompts.js';
+import { withRetry } from '../retry.js';
 
 /** Default configuration values */
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 const DEFAULT_MAX_TOKENS = 1024;
 const DEFAULT_TEMPERATURE = 0.3;
 const DEFAULT_TIMEOUT = 10000; // 10 seconds
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_BASE_DELAY = 1000; // 1 second
 
 /**
  * AI Client for extracting structured issue data using Claude
@@ -17,6 +20,8 @@ export class AgentAIClient {
   private maxTokens: number;
   private temperature: number;
   private timeout: number;
+  private maxRetries: number;
+  private retryBaseDelay: number;
 
   constructor(config: AIClientConfig) {
     this.client = new Anthropic({
@@ -27,6 +32,8 @@ export class AgentAIClient {
     this.maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.temperature = config.temperature ?? DEFAULT_TEMPERATURE;
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
+    this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryBaseDelay = config.retryBaseDelay ?? DEFAULT_RETRY_BASE_DELAY;
   }
 
   /**
@@ -38,7 +45,7 @@ export class AgentAIClient {
   ): Promise<ExtractedIssueData> {
     // Sanitize input to prevent prompt injection
     const sanitizedInput = sanitizeInput(input);
-    
+
     if (!sanitizedInput) {
       throw new Error('Input is empty after sanitization');
     }
@@ -46,50 +53,84 @@ export class AgentAIClient {
     // Build the user prompt with optional context
     const userPrompt = buildUserPrompt(sanitizedInput, context);
 
-    try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        temperature: this.temperature,
-        system: SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: userPrompt,
-          },
-        ],
-      });
+    // Use retry logic for transient failures
+    return withRetry(
+      async () => {
+        try {
+          const response = await this.client.messages.create({
+            model: this.model,
+            max_tokens: this.maxTokens,
+            temperature: this.temperature,
+            system: SYSTEM_PROMPT,
+            messages: [
+              {
+                role: 'user',
+                content: userPrompt,
+              },
+            ],
+          });
 
-      // Extract text content from response
-      const content = response.content[0];
-      if (content.type !== 'text') {
-        throw new Error('Unexpected response type from Claude');
-      }
+          // Extract text content from response
+          const content = response.content[0];
+          if (content.type !== 'text') {
+            throw new Error('Unexpected response type from Claude');
+          }
 
-      // Parse the JSON response
-      return this.parseJsonResponse(content.text);
-    } catch (error) {
-      // Handle specific error types
-      if (error instanceof Anthropic.APIError) {
-        if (error.status === 401) {
-          throw new Error('Invalid Anthropic API key. Please check your configuration.');
+          // Parse the JSON response
+          return this.parseJsonResponse(content.text);
+        } catch (error) {
+          // Handle specific error types and determine if retryable
+          if (error instanceof Anthropic.APIError) {
+            if (error.status === 401) {
+              // Auth errors are not retryable
+              throw new Error('Invalid Anthropic API key. Please check your configuration.');
+            }
+            if (error.status === 429) {
+              // Rate limit - retryable, rethrow to trigger retry
+              const retryableError = new Error('Rate limit exceeded (429)');
+              (retryableError as Error & { status: number }).status = 429;
+              throw retryableError;
+            }
+            if (error.status === 500 || error.status === 502 || error.status === 503 || error.status === 504) {
+              // Server errors - retryable
+              const retryableError = new Error(`Anthropic API temporarily unavailable (${error.status})`);
+              (retryableError as Error & { status: number }).status = error.status;
+              throw retryableError;
+            }
+            throw new Error(`Anthropic API error: ${error.message}`);
+          }
+
+          // Handle timeout - retryable
+          if (error instanceof Error && error.message.includes('timeout')) {
+            const timeoutError = new Error('AI request timed out');
+            (timeoutError as Error & { retryable: boolean }).retryable = true;
+            throw timeoutError;
+          }
+
+          throw error;
         }
-        if (error.status === 429) {
-          throw new Error('Rate limit exceeded. Please wait a moment and try again.');
-        }
-        if (error.status === 500 || error.status === 503) {
-          throw new Error('Anthropic API is temporarily unavailable. Please try again later.');
-        }
-        throw new Error(`Anthropic API error: ${error.message}`);
+      },
+      {
+        maxRetries: this.maxRetries,
+        baseDelay: this.retryBaseDelay,
+        maxDelay: 10000,
+        jitter: 0.2,
+        isRetryable: (error) => {
+          if (error instanceof Error) {
+            // Check for status codes that indicate retryable errors
+            if ('status' in error) {
+              const status = (error as Error & { status: number }).status;
+              return status === 429 || status >= 500;
+            }
+            // Check for timeout
+            if (error.message.includes('timeout') || error.message.includes('timed out')) {
+              return true;
+            }
+          }
+          return false;
+        },
       }
-      
-      // Handle timeout
-      if (error instanceof Error && error.message.includes('timeout')) {
-        throw new Error('AI request timed out. Please try again.');
-      }
-      
-      throw error;
-    }
+    );
   }
 
   /**

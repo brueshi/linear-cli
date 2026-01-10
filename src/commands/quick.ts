@@ -15,6 +15,10 @@ export function registerQuickCommand(program: Command): void {
     .option('-d, --description <description>', 'Issue description')
     .option('--project <project>', 'Project name or ID')
     .option('--label <labels>', 'Labels (comma-separated, auto-creates if needed)')
+    .option('-e, --estimate <points>', 'Story point estimate (Fibonacci: 1,2,3,5,8,13,21)')
+    .option('-a, --assignee <email>', 'Assignee email (use "me" for yourself)')
+    .option('--due <date>', 'Due date (YYYY-MM-DD format)')
+    .option('--parent <id>', 'Parent issue ID for sub-issues')
     .action(async (title: string, options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -87,24 +91,72 @@ export function registerQuickCommand(program: Command): void {
         
         // Handle labels
         let labelIds: string[] | undefined;
-        
+
         if (options.label) {
           const labelNames = parseLabels(options.label);
-          
+
           if (labelNames.length > 0) {
             // Get existing labels for context
             const existingLabels = await client.issueLabels({ first: 100 });
             const labelContext = existingLabels.nodes.map(l => ({ id: l.id, name: l.name }));
-            
+
             const result = await resolveOrCreateLabels(client, labelNames, labelContext, teamId);
             labelIds = result.labelIds;
-            
+
             if (result.createdLabels.length > 0) {
               console.log(chalk.gray(`Created labels: ${result.createdLabels.join(', ')}`));
             }
           }
         }
-        
+
+        // Handle estimate
+        const estimate = options.estimate ? parseFloat(options.estimate) : undefined;
+        if (estimate !== undefined && estimate <= 0) {
+          console.log(chalk.yellow('Estimate must be a positive number.'));
+        }
+
+        // Handle assignee
+        let assigneeId: string | undefined;
+        if (options.assignee) {
+          if (options.assignee === 'me') {
+            const viewer = await client.viewer;
+            assigneeId = viewer.id;
+          } else {
+            const users = await client.users({
+              filter: { email: { containsIgnoreCase: options.assignee } },
+              first: 1,
+            });
+            if (users.nodes.length > 0) {
+              assigneeId = users.nodes[0].id;
+            } else {
+              console.log(chalk.yellow(`User "${options.assignee}" not found, skipping assignment.`));
+            }
+          }
+        }
+
+        // Handle due date
+        let dueDate: string | undefined;
+        if (options.due) {
+          const parsed = new Date(options.due);
+          if (isNaN(parsed.getTime())) {
+            console.log(chalk.yellow(`Invalid date format "${options.due}". Use YYYY-MM-DD.`));
+          } else {
+            dueDate = options.due;
+          }
+        }
+
+        // Handle parent issue for sub-issues
+        let parentId: string | undefined;
+        if (options.parent) {
+          // Try to find the parent issue
+          const parentIssue = await findIssue(client, options.parent);
+          if (parentIssue) {
+            parentId = parentIssue.id;
+          } else {
+            console.log(chalk.yellow(`Parent issue "${options.parent}" not found, creating as standalone.`));
+          }
+        }
+
         // Create the issue
         const issuePayload = await client.createIssue({
           teamId,
@@ -113,6 +165,10 @@ export function registerQuickCommand(program: Command): void {
           priority: priority || undefined,
           projectId,
           labelIds,
+          estimate: estimate && estimate > 0 ? estimate : undefined,
+          assigneeId,
+          dueDate,
+          parentId,
         });
         
         const createdIssue = await issuePayload.issue;
@@ -140,4 +196,37 @@ export function registerQuickCommand(program: Command): void {
         process.exit(1);
       }
     });
+}
+
+/**
+ * Find an issue by identifier (e.g., "ENG-123") or ID
+ */
+async function findIssue(
+  client: Awaited<ReturnType<typeof getAuthenticatedClient>>,
+  identifier: string
+) {
+  const normalized = identifier.toUpperCase();
+  const match = normalized.match(/^([A-Z]+)-(\d+)$/);
+
+  if (match) {
+    const [, teamKey, numberStr] = match;
+    const issueNumber = parseInt(numberStr, 10);
+
+    const issues = await client.issues({
+      filter: {
+        team: { key: { eq: teamKey } },
+        number: { eq: issueNumber },
+      },
+      first: 1,
+    });
+
+    return issues.nodes[0] || null;
+  }
+
+  // Try as raw ID
+  try {
+    return await client.issue(identifier);
+  } catch {
+    return null;
+  }
 }

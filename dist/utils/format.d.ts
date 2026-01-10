@@ -35,3 +35,19 @@ export declare function formatIssueDetails(issue: Issue): Promise<string>;
  * Print a list header
  */
 export declare function printListHeader(): void;
+/**
+ * Format a comment for display
+ */
+export declare function formatComment(author: string, createdAt: Date, body: string, resolved?: boolean): string;
+/**
+ * Format a search result highlight
+ */
+export declare function formatSearchHighlight(text: string, query: string): string;
+/**
+ * Format a progress bar
+ */
+export declare function formatProgressBar(current: number, total: number, width?: number): string;
+/**
+ * Format a batch summary
+ */
+export declare function formatBatchSummary(succeeded: number, failed: number, total: number): string;

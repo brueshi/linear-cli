@@ -134,3 +134,56 @@ export function printListHeader() {
     console.log(header);
     console.log(chalk.gray('-'.repeat(100)));
 }
+/**
+ * Format a comment for display
+ */
+export function formatComment(author, createdAt, body, resolved) {
+    const lines = [];
+    const dateStr = formatDate(createdAt);
+    const resolvedStr = resolved ? chalk.green(' [Resolved]') : '';
+    lines.push(chalk.cyan(author) + chalk.gray(` - ${dateStr}`) + resolvedStr);
+    const bodyLines = body.split('\n');
+    for (const line of bodyLines) {
+        lines.push(chalk.white(`  ${line}`));
+    }
+    return lines.join('\n');
+}
+/**
+ * Format a search result highlight
+ */
+export function formatSearchHighlight(text, query) {
+    if (!query)
+        return text;
+    const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
+    return text.replace(regex, chalk.yellow.bold('$1'));
+}
+/**
+ * Escape special regex characters
+ */
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+/**
+ * Format a progress bar
+ */
+export function formatProgressBar(current, total, width = 20) {
+    const percentage = total > 0 ? current / total : 0;
+    const filled = Math.round(width * percentage);
+    const empty = width - filled;
+    const bar = chalk.green('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
+    const pct = Math.round(percentage * 100);
+    return `${bar} ${pct}%`;
+}
+/**
+ * Format a batch summary
+ */
+export function formatBatchSummary(succeeded, failed, total) {
+    const lines = [];
+    lines.push(chalk.bold('Summary:'));
+    lines.push(`  ${chalk.green(`${succeeded} succeeded`)}`);
+    if (failed > 0) {
+        lines.push(`  ${chalk.red(`${failed} failed`)}`);
+    }
+    lines.push(`  ${chalk.gray(`${total} total`)}`);
+    return lines.join('\n');
+}

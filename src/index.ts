@@ -9,13 +9,18 @@ import { registerCompletionCommand } from './commands/completion.js';
 import { registerAgentCommand } from './commands/agent.js';
 import { registerProjectCommands } from './commands/project.js';
 import { registerLabelCommands } from './commands/label.js';
+import { registerSearchCommands } from './commands/search.js';
+import { registerMeCommand } from './commands/me.js';
+import { registerCommentCommands } from './commands/comment.js';
+import { registerBatchCommands } from './commands/batch.js';
+import { registerSyncCommand } from './commands/sync.js';
 
 const program = new Command();
 
 program
   .name('linear')
   .description('Command line interface for Linear issue management.\n\nManage issues, create branches, and streamline your workflow without leaving the terminal.')
-  .version('0.1.0')
+  .version('0.2.0')
   .addHelpText('after', `
 Examples:
   $ linear auth login                    # Authenticate with Linear
@@ -23,10 +28,12 @@ Examples:
   $ linear issue create                  # Create issue interactively
   $ linear quick "Fix login bug"         # Quick issue creation
   $ linear agent "Fix auth bug, urgent"  # AI-powered issue creation
+  $ linear search "authentication"       # Search issues
+  $ linear me                            # View your dashboard
+  $ linear comment list ENG-123          # View comments on issue
+  $ linear batch update ENG-1 ENG-2 -s done  # Bulk update issues
   $ linear branch ENG-123                # Create branch for issue
-  $ linear project list                  # List projects
-  $ linear label list                    # List labels
-  $ linear config set defaultTeam ENG    # Set default team
+  $ linear sync                          # Refresh workspace cache
 
 Documentation:
   https://github.com/your-username/linear-cli
@@ -42,6 +49,11 @@ registerQuickCommand(program);
 registerBranchCommand(program);
 registerCompletionCommand(program);
 registerAgentCommand(program);
+registerSearchCommands(program);
+registerMeCommand(program);
+registerCommentCommands(program);
+registerBatchCommands(program);
+registerSyncCommand(program);
 
 // Handle unknown commands gracefully
 program.on('command:*', (operands) => {

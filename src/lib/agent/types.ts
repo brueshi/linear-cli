@@ -131,16 +131,22 @@ export interface AgentOptions {
 export interface AIClientConfig {
   /** Anthropic API key */
   apiKey: string;
-  
+
   /** Model to use (default: claude-haiku-4-5-20251001) */
   model?: string;
-  
+
   /** Maximum tokens in response */
   maxTokens?: number;
-  
+
   /** Temperature for response generation */
   temperature?: number;
-  
+
   /** Request timeout in milliseconds */
   timeout?: number;
+
+  /** Maximum retry attempts for transient failures (default: 3) */
+  maxRetries?: number;
+
+  /** Base delay between retries in milliseconds (default: 1000) */
+  retryBaseDelay?: number;
 }

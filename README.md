@@ -1,6 +1,6 @@
 # Linear CLI
 
-A command line interface for [Linear](https://linear.app) issue management. Create issues, manage workflows, and generate git branches without leaving the terminal.
+A command line interface for [Linear](https://linear.app) issue management. Create issues, manage workflows, search, comment, and generate git branches without leaving the terminal.
 
 ## Installation
 
@@ -49,9 +49,11 @@ linear issue list
 # Create an issue quickly
 linear quick "Fix the login bug"
 
-# List projects and labels
-linear project list
-linear label list
+# Search for issues
+linear search "authentication bug"
+
+# View your personal dashboard
+linear me
 
 # AI-powered issue creation (requires Anthropic API key)
 linear agent "Fix auth token refresh in Safari, backend team, urgent"
@@ -103,6 +105,93 @@ linear issue update ATT-123 --label "bug,api"         # Set labels
 linear issue update ATT-123 --add-label "urgent"      # Add labels
 ```
 
+### Search
+
+Search across your workspace with full-text search:
+
+```bash
+# Basic search
+linear search "authentication bug"
+
+# With filters
+linear search "login" -t ATT                    # Filter by team
+linear search "performance" -s "in progress"   # Filter by state
+linear search "api" -a me                       # Filter by assignee
+linear search "dashboard" -p "Q1 Roadmap"      # Filter by project
+linear search "urgent" -l bug                   # Filter by label
+
+# Include archived issues
+linear search "old feature" --include-archived
+
+# Limit results
+linear search "bug" --limit 50
+```
+
+### Personal Dashboard
+
+View your assigned issues, upcoming due dates, and activity:
+
+```bash
+# Full dashboard
+linear me
+
+# Filtered views
+linear me --assigned    # Only issues assigned to you
+linear me --created     # Only issues you created
+linear me --due         # Only issues with upcoming due dates
+```
+
+### Comments
+
+Manage comments on issues:
+
+```bash
+# List comments on an issue
+linear comment list ATT-123
+linear comment list ATT-123 --include-resolved
+
+# Add a comment
+linear comment add ATT-123 "This looks good, shipping tomorrow"
+linear comment add ATT-123 --editor    # Open editor for longer comments
+
+# Resolve/unresolve comments
+linear comment resolve <comment-id>
+linear comment unresolve <comment-id>
+
+# Delete a comment
+linear comment delete <comment-id>
+linear comment delete <comment-id> -y  # Skip confirmation
+```
+
+### Batch Operations
+
+Perform bulk operations on multiple issues:
+
+```bash
+# Bulk update status
+linear batch update ATT-123 ATT-124 ATT-125 -s "done"
+
+# Bulk update with file input
+linear batch update --file issues.txt -s "in progress"
+
+# Bulk update priority
+linear batch update ATT-123 ATT-124 -p 2
+
+# Bulk assign
+linear batch assign ATT-123 ATT-124 --to me
+linear batch assign ATT-123 ATT-124 --to user@example.com
+
+# Bulk close
+linear batch close ATT-123 ATT-124 ATT-125
+
+# Add/remove labels in bulk
+linear batch update ATT-123 ATT-124 --add-label "urgent,api"
+linear batch update ATT-123 ATT-124 --remove-label "backlog"
+
+# Move to project
+linear batch update ATT-123 ATT-124 --project "Q1 Roadmap"
+```
+
 ### Quick Create
 
 Create issues with minimal input:
@@ -113,6 +202,12 @@ linear quick "Urgent fix" -p 1                  # With priority (1=Urgent)
 linear quick "New feature" -t ATT -d "Details"  # With team and description
 linear quick "API bug" --project "Q1 Roadmap"   # Assign to project
 linear quick "Bug fix" --label "bug,api"        # With labels (auto-created if needed)
+
+# New in v0.0.7
+linear quick "Story" -e 5                       # With estimate (story points)
+linear quick "Task" -a me                       # Assign to yourself
+linear quick "Deadline task" --due 2024-12-31   # With due date
+linear quick "Sub-task" --parent ATT-100        # Create as sub-issue
 ```
 
 ### AI-Powered Issue Creation
@@ -151,6 +246,74 @@ linear agent "New feature" --auto --project "Q1 Roadmap"
 linear agent "Update documentation" --auto --assign-to-me
 ```
 
+#### Sub-issues and Linking
+
+```bash
+# Create as sub-issue
+linear agent "Implement auth flow" --parent ATT-100
+
+# Link to related issues
+linear agent "Related refactor" --relates-to ATT-101 ATT-102
+```
+
+#### Templates
+
+Use templates for common issue types:
+
+```bash
+# Use built-in templates
+linear agent "login validation" --template bug
+linear agent "user export" --template feature
+linear agent "cleanup code" --template task
+linear agent "server down" --template urgent
+
+# Manage templates
+linear agent-template list                              # List all templates
+linear agent-template save hotfix "HOTFIX: {title}" -P 1  # Create custom template
+linear agent-template delete hotfix                     # Delete custom template
+linear agent-template reset                             # Reset to defaults
+```
+
+#### Batch Mode
+
+Process multiple issues at once:
+
+```bash
+# From stdin
+echo -e "Fix bug A\nFix bug B\nFix bug C" | linear agent "" --batch --team ATT
+
+# With auto-create
+cat issues.txt | linear agent "" --batch --auto
+
+# Continue on errors
+cat issues.txt | linear agent "" --batch --continue-on-error
+```
+
+#### Enhanced Dry Run
+
+The `--dry-run` flag now shows detailed resolution information:
+
+```
+Dry Run - Extracted Issue Data
+──────────────────────────────────────────────────
+
+Title:       Fix authentication bug in Safari
+Team:        Backend (BE) ✓ resolved
+Project:     Q1 Roadmap ✓ resolved
+Type:        Bug
+Priority:    High
+Labels:
+  Existing:  backend, api ✓
+  To create: safari (will be created)
+Assignee:    Joe Developer (you)
+
+Description:
+  Users are experiencing login failures...
+
+──────────────────────────────────────────────────
+No issue created (dry run mode)
+```
+
 #### Flags
 
 | Flag | Short | Description |
@@ -161,6 +324,11 @@ linear agent "Update documentation" --auto --assign-to-me
 | `--project <name>` | `-p` | Assign to project by name |
 | `--priority <0-4>` | `-P` | Override AI priority (1=Urgent, 4=Low) |
 | `--assign-to-me` | `-m` | Assign the issue to yourself |
+| `--parent <id>` | | Create as sub-issue of parent |
+| `--relates-to <ids>` | | Link to related issues |
+| `--template <name>` | | Use a saved template |
+| `--batch` | | Process multiple inputs from stdin |
+| `--continue-on-error` | | Continue batch on errors |
 | `--no-context` | | Disable workspace context fetching |
 
 #### How It Works
@@ -171,6 +339,7 @@ linear agent "Update documentation" --auto --assign-to-me
 4. Validates against your workspace
 5. Shows confirmation preview (unless `--auto`)
 6. Creates the issue in Linear
+7. Auto-creates any missing labels
 
 #### AI Detection Examples
 
@@ -180,6 +349,21 @@ linear agent "Update documentation" --auto --assign-to-me
 | "Add dark mode, frontend" | Type: Feature, Team: Frontend |
 | "Refactor auth service, 5 points" | Type: Improvement, Estimate: 5 |
 | "ASAP: prod is down" | Priority: Urgent |
+
+#### Reliability Features (v0.0.7)
+
+- **Automatic retry** with exponential backoff for rate limits and transient errors
+- **Parallel batch processing** (3 concurrent by default) for faster bulk operations
+- **Label auto-creation** works in batch mode
+
+### Sync
+
+Force refresh the workspace cache:
+
+```bash
+linear sync              # Refresh cache
+linear sync -v           # Verbose - show workspace details
+```
 
 ### Git Branch Generation
 
@@ -276,6 +460,32 @@ linear completion fish > ~/.config/fish/completions/linear.fish
 linear agent "NPE in user service when profile incomplete, backend, urgent" --auto
 ```
 
+### Personal Workflow
+
+```bash
+# Morning routine - check your dashboard
+linear me
+
+# Search for related work
+linear search "auth" -a me
+
+# Quick comment on an issue
+linear comment add ATT-123 "Started working on this"
+```
+
+### Bulk Operations
+
+```bash
+# Close all completed sprint issues
+linear batch close ATT-100 ATT-101 ATT-102 ATT-103
+
+# Reassign issues during handoff
+linear batch assign ATT-200 ATT-201 ATT-202 --to colleague@example.com
+
+# Move issues to new sprint
+linear batch update ATT-300 ATT-301 --project "Sprint 42"
+```
+
 ### Git Hook Automation
 
 ```bash
@@ -303,10 +513,13 @@ fi
 alias bug='linear agent --auto --priority 1'
 alias feature='linear agent --auto --priority 2'
 alias task='linear agent --auto --priority 3'
+alias lme='linear me'
+alias lsearch='linear search'
 
 # Usage
 bug "Login form validation broken, backend"
 feature "Add export to CSV, frontend"
+lme --due  # Check upcoming deadlines
 ```
 
 ## Security
@@ -329,6 +542,32 @@ feature "Add export to CSV, frontend"
 | Node.js | ~200-300ms | `npm install -g` |
 | Bun | ~30-50ms | `bun install -g` |
 | Standalone | ~20-40ms | Pre-compiled binary |
+
+## Changelog
+
+### v0.0.7
+
+**New Commands:**
+- `linear search` - Full-text search with filters
+- `linear me` - Personal dashboard
+- `linear comment` - Comment management (list, add, resolve, delete)
+- `linear batch` - Bulk operations (update, close, assign)
+- `linear sync` - Force refresh workspace cache
+
+**Agent Improvements:**
+- Automatic retry with exponential backoff for rate limits and errors
+- Parallel batch processing (3x faster for bulk operations)
+- Label auto-creation now works in batch mode
+- Enhanced dry-run output with resolution details
+- Sub-issue support (`--parent`)
+- Issue linking (`--relates-to`)
+- Template system for common issue types
+
+**Quick Command Enhancements:**
+- `--estimate` / `-e` - Story point estimates
+- `--assignee` / `-a` - Direct assignment
+- `--due` - Due date support
+- `--parent` - Sub-issue creation
 
 ## License
 
