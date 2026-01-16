@@ -2,6 +2,43 @@ import chalk from 'chalk';
 import type { Issue, WorkflowState, User } from '@linear/sdk';
 
 /**
+ * Box drawing characters for panels
+ */
+const BOX = {
+  topLeft: '┌',
+  topRight: '┐',
+  bottomLeft: '└',
+  bottomRight: '┘',
+  horizontal: '─',
+  vertical: '│',
+  teeRight: '├',
+  teeLeft: '┤',
+};
+
+/**
+ * Status indicators with Unicode symbols
+ */
+const STATUS_ICONS: Record<string, string> = {
+  backlog: '○',
+  unstarted: '○',
+  started: '◐',
+  completed: '●',
+  canceled: '✕',
+  triage: '◇',
+};
+
+/**
+ * Priority indicators
+ */
+const PRIORITY_ICONS: Record<number, string> = {
+  0: '   ',
+  1: '!!!',
+  2: '!! ',
+  3: '!  ',
+  4: '   ',
+};
+
+/**
  * Color mapping for workflow state categories
  */
 const STATE_COLORS: Record<string, (text: string) => string> = {
@@ -20,7 +57,7 @@ const PRIORITY_MAP: Record<number, { label: string; color: (text: string) => str
   0: { label: 'None', color: chalk.gray },
   1: { label: 'Urgent', color: chalk.red },
   2: { label: 'High', color: chalk.yellow },
-  3: { label: 'Medium', color: chalk.blue },
+  3: { label: 'Medium', color: chalk.cyan },
   4: { label: 'Low', color: chalk.gray },
 };
 
@@ -232,4 +269,197 @@ export function formatBatchSummary(succeeded: number, failed: number, total: num
 
   return lines.join('\n');
 }
+
+/**
+ * Format a state with icon
+ */
+export function formatStateWithIcon(state: WorkflowState): string {
+  const icon = STATUS_ICONS[state.type] || '○';
+  const colorFn = STATE_COLORS[state.type] || chalk.white;
+  return colorFn(`${icon} ${state.name}`);
+}
+
+/**
+ * Format priority with icon
+ */
+export function formatPriorityWithIcon(priority: number): string {
+  const config = PRIORITY_MAP[priority] || PRIORITY_MAP[0];
+  const icon = PRIORITY_ICONS[priority] || '   ';
+  return config.color(`${icon} ${config.label}`);
+}
+
+/**
+ * Create a horizontal divider
+ */
+export function divider(width: number = 60, char: string = '─'): string {
+  return chalk.gray(char.repeat(width));
+}
+
+/**
+ * Create a titled section divider
+ */
+export function sectionDivider(title: string, width: number = 60): string {
+  const padding = Math.max(0, width - title.length - 4);
+  const leftPad = Math.floor(padding / 2);
+  const rightPad = padding - leftPad;
+  return chalk.gray('─'.repeat(leftPad) + '[ ') + chalk.bold(title) + chalk.gray(' ]' + '─'.repeat(rightPad));
+}
+
+/**
+ * Format a label with its color (hex color support)
+ */
+export function formatLabel(name: string, hexColor?: string): string {
+  if (hexColor) {
+    try {
+      return chalk.hex(hexColor).bold(` ${name} `);
+    } catch {
+      return chalk.magenta.bold(` ${name} `);
+    }
+  }
+  return chalk.magenta.bold(` ${name} `);
+}
+
+/**
+ * Format a colored label badge
+ */
+export function formatLabelBadge(name: string, hexColor?: string): string {
+  if (hexColor) {
+    try {
+      const bg = chalk.bgHex(hexColor).black;
+      return bg(` ${name} `);
+    } catch {
+      return chalk.bgMagenta.white(` ${name} `);
+    }
+  }
+  return chalk.bgMagenta.white(` ${name} `);
+}
+
+/**
+ * Format a key-value pair with consistent alignment
+ */
+export function formatKeyValue(key: string, value: string, keyWidth: number = 12): string {
+  return chalk.gray(key.padEnd(keyWidth)) + value;
+}
+
+/**
+ * Format an info box with a title
+ */
+export function formatInfoBox(title: string, lines: string[], width: number = 60): string {
+  const result: string[] = [];
+  const innerWidth = width - 4;
+
+  // Top border with title
+  const titlePadded = ` ${title} `;
+  const topBorderLength = Math.max(0, width - titlePadded.length - 2);
+  const leftBorder = Math.floor(topBorderLength / 2);
+  const rightBorder = topBorderLength - leftBorder;
+
+  result.push(
+    chalk.gray(BOX.topLeft + BOX.horizontal.repeat(leftBorder)) +
+    chalk.bold.cyan(titlePadded) +
+    chalk.gray(BOX.horizontal.repeat(rightBorder) + BOX.topRight)
+  );
+
+  // Content lines
+  for (const line of lines) {
+    const paddedLine = line.padEnd(innerWidth).slice(0, innerWidth);
+    result.push(chalk.gray(BOX.vertical + ' ') + paddedLine + chalk.gray(' ' + BOX.vertical));
+  }
+
+  // Bottom border
+  result.push(chalk.gray(BOX.bottomLeft + BOX.horizontal.repeat(width - 2) + BOX.bottomRight));
+
+  return result.join('\n');
+}
+
+/**
+ * Format a success message
+ */
+export function formatSuccess(message: string): string {
+  return chalk.green('✓ ') + message;
+}
+
+/**
+ * Format an error message
+ */
+export function formatError(message: string): string {
+  return chalk.red('✗ ') + message;
+}
+
+/**
+ * Format a warning message
+ */
+export function formatWarning(message: string): string {
+  return chalk.yellow('⚠ ') + message;
+}
+
+/**
+ * Format an info message
+ */
+export function formatInfo(message: string): string {
+  return chalk.blue('ℹ ') + message;
+}
+
+/**
+ * Format a list of items with bullets
+ */
+export function formatBulletList(items: string[], indent: number = 2): string {
+  const indentStr = ' '.repeat(indent);
+  return items.map(item => `${indentStr}${chalk.gray('•')} ${item}`).join('\n');
+}
+
+/**
+ * Format a numbered list
+ */
+export function formatNumberedList(items: string[], indent: number = 2): string {
+  const indentStr = ' '.repeat(indent);
+  return items.map((item, i) => `${indentStr}${chalk.cyan(`${i + 1}.`)} ${item}`).join('\n');
+}
+
+/**
+ * Format a table row with columns
+ */
+export function formatTableRow(columns: string[], widths: number[]): string {
+  return columns
+    .map((col, i) => truncate(col, widths[i]).padEnd(widths[i]))
+    .join(' ');
+}
+
+/**
+ * Format a table header with columns
+ */
+export function formatTableHeader(columns: string[], widths: number[]): string {
+  const header = columns
+    .map((col, i) => chalk.bold(col.padEnd(widths[i])))
+    .join(' ');
+  const separator = widths.map(w => '─'.repeat(w)).join('─');
+  return header + '\n' + chalk.gray(separator);
+}
+
+/**
+ * Create a simple spinner-style indicator text
+ */
+export function formatSpinner(text: string): string {
+  return chalk.cyan('◌ ') + chalk.gray(text + '...');
+}
+
+/**
+ * Format time ago (e.g., "2 hours ago")
+ */
+export function formatTimeAgo(date: Date | string): string {
+  const now = new Date();
+  const then = new Date(date);
+  const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return formatDate(then);
+}
+
+/**
+ * Export box characters for external use
+ */
+export { BOX, STATUS_ICONS, PRIORITY_ICONS };
 

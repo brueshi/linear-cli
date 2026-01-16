@@ -13,7 +13,7 @@ import { BatchProcessor, parseBatchInput } from '../lib/agent/batch-processor.js
 import { TemplateManager } from '../lib/agent/templates.js';
 import { resolveOrCreateLabels } from '../lib/agent/labels.js';
 import type { ExtractedIssueData, AgentOptions, WorkspaceContext } from '../lib/agent/types.js';
-import { formatIdentifier } from '../utils/format.js';
+import { formatIdentifier, divider, formatSuccess, formatWarning } from '../utils/format.js';
 
 /**
  * Extended agent options with new features
@@ -408,13 +408,16 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
     let projectId: string | undefined;
     let projectName: string | undefined;
 
-    // If project specified via flag, try to resolve it
-    if (options.project) {
+    // Determine project source: CLI flag takes precedence, then AI extraction
+    const projectToResolve = options.project || extracted.projectName;
+
+    // If project specified via flag or AI extraction, try to resolve it
+    if (projectToResolve) {
       // First try to find in cached context
       if (context) {
         const project = context.projects.find(p =>
-          p.id === options.project ||
-          p.name.toLowerCase().includes(options.project!.toLowerCase())
+          p.id === projectToResolve ||
+          p.name.toLowerCase().includes(projectToResolve.toLowerCase())
         );
         if (project) {
           projectId = project.id;
@@ -422,14 +425,14 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
         }
       }
 
-      // If not found in context, search via API (like quick command does)
+      // If not found in context, search via API
       if (!projectId) {
         try {
           const projects = await linearClient.projects({
             filter: {
               or: [
-                { name: { containsIgnoreCase: options.project } },
-                { id: { eq: options.project } },
+                { name: { containsIgnoreCase: projectToResolve } },
+                { id: { eq: projectToResolve } },
               ],
             },
             first: 1,
@@ -438,15 +441,18 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
           if (projects.nodes.length > 0) {
             projectId = projects.nodes[0].id;
             projectName = projects.nodes[0].name;
-          } else {
-            console.log(chalk.yellow(`Project "${options.project}" not found, skipping.`));
+          } else if (options.project) {
+            // Only warn if it was a CLI flag (not AI extraction that might be wrong)
+            console.log(chalk.yellow(`Project "${projectToResolve}" not found, skipping.`));
           }
         } catch {
-          console.log(chalk.yellow(`Could not search for project "${options.project}", skipping.`));
+          if (options.project) {
+            console.log(chalk.yellow(`Could not search for project "${projectToResolve}", skipping.`));
+          }
         }
       }
     }
-    
+
     // Prompt for project selection if not in auto mode and we have a team
     if (!projectId && teamId && context && !options.auto && !options.dryRun) {
       // Filter projects by team
@@ -480,7 +486,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
     if (options.dryRun) {
       console.log('');
       console.log(chalk.bold.cyan('Dry Run - Extracted Issue Data'));
-      console.log(chalk.gray('─'.repeat(50)));
+      console.log(divider(50));
       console.log('');
 
       // Title
@@ -497,11 +503,14 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
         console.log(chalk.gray('Team:        ') + chalk.red('Not specified') + chalk.gray(' (will prompt)'));
       }
 
-      // Project - show resolved name
+      // Project - show resolved name and source
       if (projectId && projectName) {
-        console.log(chalk.gray('Project:     ') + chalk.green(projectName) + chalk.gray(' ✓ resolved'));
+        const source = options.project ? '(from flag)' : extracted.projectName ? '(AI detected)' : '';
+        console.log(chalk.gray('Project:     ') + chalk.green(projectName) + chalk.gray(` ✓ resolved ${source}`));
       } else if (options.project) {
         console.log(chalk.gray('Project:     ') + chalk.yellow(options.project) + chalk.gray(' (will search)'));
+      } else if (extracted.projectName) {
+        console.log(chalk.gray('Project:     ') + chalk.yellow(extracted.projectName) + chalk.gray(' (AI detected, will search)'));
       } else {
         console.log(chalk.gray('Project:     ') + chalk.gray('None'));
       }
@@ -591,7 +600,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       }
 
       console.log('');
-      console.log(chalk.gray('─'.repeat(50)));
+      console.log(divider(50));
       console.log(chalk.gray('No issue created (dry run mode)'));
       console.log(chalk.gray('Remove --dry-run or -d to create the issue.'));
       return;
@@ -712,26 +721,31 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       }
       
       console.log('');
-      console.log(
-        chalk.green('Created ') +
+      console.log(formatSuccess(
+        'Created ' +
         formatIdentifier(createdIssue.identifier) +
         ' - ' +
         createdIssue.title
-      );
-      console.log(chalk.gray('  ' + createdIssue.url));
-      
+      ));
+      console.log(chalk.gray('  URL: ') + chalk.underline(createdIssue.url));
+
+      // Show project assignment
+      if (projectName) {
+        console.log(chalk.gray('  Project: ') + chalk.cyan(projectName));
+      }
+
       // Show created labels
       if (createdLabels.length > 0) {
-        console.log(chalk.gray(`  Created labels: ${createdLabels.join(', ')}`));
+        console.log(chalk.gray('  Created labels: ') + createdLabels.map(l => chalk.magenta(l)).join(', '));
       }
-      
+
       // Suggest git branch
-      const branchName = createdIssue.identifier.toLowerCase() + '-' + 
+      const branchName = createdIssue.identifier.toLowerCase() + '-' +
         createdIssue.title.toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-|-$/g, '')
           .slice(0, 40);
-      console.log(chalk.gray(`  Branch: git checkout -b ${branchName}`));
+      console.log(chalk.gray('  Branch: ') + chalk.cyan(`git checkout -b ${branchName}`));
     } else {
       console.log(chalk.red('Failed to create issue.'));
       process.exit(1);

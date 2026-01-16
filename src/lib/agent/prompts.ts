@@ -13,6 +13,7 @@ Your task is to parse the user's input and extract the following fields:
   * Keep each bullet point concise and actionable
   * Separate sections with blank lines for readability
 - teamKey: Team identifier if mentioned (e.g., ATT, FE, BE, OPS, backend, frontend)
+- projectName: Project to assign the issue to (match against available workspace projects)
 - priority: 0=No priority, 1=Urgent, 2=High, 3=Medium, 4=Low
 - estimate: Story points (1, 2, 3, 5, 8, 13, 21) if mentioned
 - labels: Array of relevant labels - prefer existing workspace labels when available
@@ -53,12 +54,24 @@ Guidelines:
    - backend, BE, server, api -> likely backend team
    - frontend, FE, UI, client -> likely frontend team
    - devops, ops, infra, infrastructure -> likely ops team
+9. For project assignment:
+   - Match against available workspace projects (case-insensitive partial match)
+   - Look for project names or keywords in the input
+   - Common patterns to match:
+     * "Features" or "feature" -> match projects with "Features" in the name
+     * "AI Service" or "ai" or "service" -> match projects with "AI Service" in the name
+     * "UI" or "ui fixes" or "frontend fixes" -> match projects with "UI" in the name
+     * "Bugs" or "bug fixes" -> match projects with "Bug" or "Fixes" in the name
+   - If the issue type is a bug and there's a bug-related project, prefer that project
+   - If the issue type is a feature and there's a features project, prefer that project
+   - If multiple projects could match, choose the most specific one
 
 Return ONLY valid JSON matching this exact schema, with no additional text or markdown:
 {
   "title": "string (required)",
   "description": "string or null",
   "teamKey": "string or null",
+  "projectName": "string or null",
   "priority": "number 0-4 or null",
   "estimate": "number or null",
   "labels": "array of strings or null",

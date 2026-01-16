@@ -17,8 +17,11 @@ export interface ExtractedIssueData {
   
   /** Team ID (resolved from teamKey) */
   teamId?: string;
-  
-  /** Project ID */
+
+  /** Project name (for AI extraction) */
+  projectName?: string;
+
+  /** Project ID (resolved from projectName) */
   projectId?: string;
   
   /** Priority: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low */

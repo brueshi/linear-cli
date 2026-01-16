@@ -173,6 +173,10 @@ export class AgentAIClient {
         extracted.teamKey = parsed.teamKey.toUpperCase().trim();
       }
 
+      if (parsed.projectName && typeof parsed.projectName === 'string') {
+        extracted.projectName = parsed.projectName.trim();
+      }
+
       if (typeof parsed.priority === 'number' && parsed.priority >= 0 && parsed.priority <= 4) {
         extracted.priority = parsed.priority;
       }
