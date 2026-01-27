@@ -2,6 +2,14 @@ import { Command } from 'commander';
 import { input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { getAuthenticatedClient } from '../lib/client.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  labelToJson,
+  ExitCodes,
+  type LabelJson,
+} from '../utils/json-output.js';
 
 /**
  * Register label management commands
@@ -19,6 +27,7 @@ export function registerLabelCommands(program: Command): void {
     .description('List all labels in the workspace')
     .option('-t, --team <team>', 'Filter by team key')
     .option('-l, --limit <number>', 'Maximum number of labels to show', '50')
+    .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -34,9 +43,13 @@ export function registerLabelCommands(program: Command): void {
           );
           
           if (!team) {
+            if (isJsonMode()) {
+              outputJsonError('TEAM_NOT_FOUND', `Team "${options.team}" not found`);
+              process.exit(ExitCodes.NOT_FOUND);
+            }
             console.log(chalk.red(`Team "${options.team}" not found.`));
             console.log('Available teams: ' + teams.nodes.map(t => t.key).join(', '));
-            process.exit(1);
+            process.exit(ExitCodes.NOT_FOUND);
           }
           
           filter = { team: { id: { eq: team.id } } };
@@ -46,6 +59,12 @@ export function registerLabelCommands(program: Command): void {
           filter,
           first: parseInt(options.limit, 10),
         });
+        
+        if (isJsonMode()) {
+          const labelsJson: LabelJson[] = labels.nodes.map(l => labelToJson(l));
+          outputJson({ labels: labelsJson, count: labelsJson.length });
+          return;
+        }
         
         if (labels.nodes.length === 0) {
           console.log(chalk.yellow('No labels found.'));
@@ -64,11 +83,15 @@ export function registerLabelCommands(program: Command): void {
         console.log('');
         console.log(chalk.gray(`Showing ${labels.nodes.length} label${labels.nodes.length === 1 ? '' : 's'}`));
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to fetch labels.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 

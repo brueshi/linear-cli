@@ -2,6 +2,14 @@ import { Command } from 'commander';
 import { input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { getAuthenticatedClient } from '../lib/client.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  projectToJson,
+  ExitCodes,
+  type ProjectJson,
+} from '../utils/json-output.js';
 
 /**
  * Format project state for display
@@ -37,6 +45,7 @@ export function registerProjectCommands(program: Command): void {
     .option('-t, --team <team>', 'Filter by team key')
     .option('-s, --state <state>', 'Filter by state (planned, started, paused, completed)')
     .option('-l, --limit <number>', 'Maximum number of projects to show', '25')
+    .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -63,9 +72,13 @@ export function registerProjectCommands(program: Command): void {
           );
           
           if (!team) {
+            if (isJsonMode()) {
+              outputJsonError('TEAM_NOT_FOUND', `Team "${options.team}" not found`);
+              process.exit(ExitCodes.NOT_FOUND);
+            }
             console.log(chalk.red(`Team "${options.team}" not found.`));
             console.log('Available teams: ' + teams.nodes.map(t => t.key).join(', '));
-            process.exit(1);
+            process.exit(ExitCodes.NOT_FOUND);
           }
           
           // Filter projects by team association
@@ -82,6 +95,14 @@ export function registerProjectCommands(program: Command): void {
           filteredProjects = projectsWithTeams
             .filter(p => p.hasTeam)
             .map(p => p.project);
+        }
+        
+        if (isJsonMode()) {
+          const projectsJson: ProjectJson[] = await Promise.all(
+            filteredProjects.map(p => projectToJson(p))
+          );
+          outputJson({ projects: projectsJson, count: projectsJson.length });
+          return;
         }
         
         if (filteredProjects.length === 0) {
@@ -110,11 +131,15 @@ export function registerProjectCommands(program: Command): void {
         console.log('');
         console.log(chalk.gray(`Showing ${filteredProjects.length} project${filteredProjects.length === 1 ? '' : 's'}`));
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to fetch projects.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 
@@ -124,6 +149,7 @@ export function registerProjectCommands(program: Command): void {
   project
     .command('view <name>')
     .description('View project details')
+    .option('--json', 'Output in JSON format')
     .action(async (name: string) => {
       try {
         const client = await getAuthenticatedClient();
@@ -135,8 +161,12 @@ export function registerProjectCommands(program: Command): void {
         });
         
         if (projects.nodes.length === 0) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Project "${name}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Project "${name}" not found.`));
-          process.exit(1);
+          process.exit(ExitCodes.NOT_FOUND);
         }
         
         // If multiple matches, pick the exact match or first one
@@ -144,8 +174,8 @@ export function registerProjectCommands(program: Command): void {
           p => p.name.toLowerCase() === name.toLowerCase()
         ) || projects.nodes[0];
         
-        // If multiple matches and no exact match, let user select
-        if (projects.nodes.length > 1 && !projects.nodes.find(
+        // If multiple matches and no exact match, let user select (skip in JSON mode)
+        if (!isJsonMode() && projects.nodes.length > 1 && !projects.nodes.find(
           p => p.name.toLowerCase() === name.toLowerCase()
         )) {
           const projectId = await select({
@@ -156,6 +186,12 @@ export function registerProjectCommands(program: Command): void {
             })),
           });
           proj = projects.nodes.find(p => p.id === projectId)!;
+        }
+        
+        if (isJsonMode()) {
+          const projectJson = await projectToJson(proj);
+          outputJson({ project: projectJson });
+          return;
         }
         
         // Get additional details
@@ -210,11 +246,15 @@ export function registerProjectCommands(program: Command): void {
           console.log(chalk.gray('\nCancelled.'));
           return;
         }
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to fetch project.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 

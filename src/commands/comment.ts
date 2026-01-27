@@ -3,6 +3,14 @@ import chalk from 'chalk';
 import { editor, confirm } from '@inquirer/prompts';
 import { getAuthenticatedClient } from '../lib/client.js';
 import { formatIdentifier, formatDate } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  commentToJson,
+  ExitCodes,
+  type CommentJson,
+} from '../utils/json-output.js';
 
 /**
  * Register comment commands
@@ -17,24 +25,48 @@ export function registerCommentCommands(program: Command): void {
     .command('list <issue>')
     .description('List all comments on an issue')
     .option('--include-resolved', 'Include resolved comments')
+    .option('--json', 'Output in JSON format')
     .action(async (issueId: string, options) => {
       try {
         const client = await getAuthenticatedClient();
         const issue = await findIssue(client, issueId);
 
         if (!issue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${issueId}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Issue "${issueId}" not found.`));
-          process.exit(1);
+          process.exit(ExitCodes.NOT_FOUND);
         }
-
-        console.log(chalk.bold(`\nComments on ${formatIdentifier(issue.identifier)}: ${issue.title}`));
-        console.log(chalk.gray('-'.repeat(60)));
-        console.log('');
 
         const comments = await issue.comments({
           first: 50,
           orderBy: { createdAt: 'ascending' } as unknown as undefined,
         });
+
+        // Filter comments based on resolved state
+        let filteredComments = comments.nodes;
+        if (!options.includeResolved) {
+          filteredComments = comments.nodes.filter(c => !c.resolvedAt);
+        }
+
+        if (isJsonMode()) {
+          const commentsJson: CommentJson[] = await Promise.all(
+            filteredComments.map(c => commentToJson(c))
+          );
+          outputJson({ 
+            comments: commentsJson, 
+            count: commentsJson.length,
+            totalCount: comments.nodes.length,
+            resolvedCount: comments.nodes.filter(c => c.resolvedAt).length,
+          });
+          return;
+        }
+
+        console.log(chalk.bold(`\nComments on ${formatIdentifier(issue.identifier)}: ${issue.title}`));
+        console.log(chalk.gray('-'.repeat(60)));
+        console.log('');
 
         if (comments.nodes.length === 0) {
           console.log(chalk.gray('No comments on this issue.'));
@@ -85,20 +117,25 @@ export function registerCommentCommands(program: Command): void {
     .command('add <issue> [body]')
     .description('Add a comment to an issue')
     .option('-e, --editor', 'Open editor for comment body')
+    .option('--json', 'Output in JSON format')
     .action(async (issueId: string, body: string | undefined, options) => {
       try {
         const client = await getAuthenticatedClient();
         const issue = await findIssue(client, issueId);
 
         if (!issue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${issueId}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Issue "${issueId}" not found.`));
-          process.exit(1);
+          process.exit(ExitCodes.NOT_FOUND);
         }
 
         let commentBody = body;
 
-        // If no body provided or editor flag, open editor
-        if (!commentBody || options.editor) {
+        // If no body provided or editor flag, open editor (skip in JSON mode if body provided)
+        if (!isJsonMode() && (!commentBody || options.editor)) {
           commentBody = await editor({
             message: 'Write your comment:',
             default: body || '',
@@ -107,6 +144,10 @@ export function registerCommentCommands(program: Command): void {
         }
 
         if (!commentBody || !commentBody.trim()) {
+          if (isJsonMode()) {
+            outputJsonError('EMPTY_BODY', 'Comment body is empty');
+            process.exit(ExitCodes.VALIDATION_ERROR);
+          }
           console.log(chalk.yellow('Comment body is empty. Cancelled.'));
           return;
         }
@@ -120,10 +161,19 @@ export function registerCommentCommands(program: Command): void {
         const createdComment = await result.comment;
 
         if (createdComment) {
+          if (isJsonMode()) {
+            const commentJson = await commentToJson(createdComment);
+            outputJson({ comment: commentJson });
+            return;
+          }
           console.log(chalk.green(`\nComment added to ${formatIdentifier(issue.identifier)}`));
         } else {
+          if (isJsonMode()) {
+            outputJsonError('CREATE_FAILED', 'Failed to create comment');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red('Failed to create comment.'));
-          process.exit(1);
+          process.exit(ExitCodes.GENERAL_ERROR);
         }
 
       } catch (error) {

@@ -14,13 +14,30 @@ import { registerMeCommand } from './commands/me.js';
 import { registerCommentCommands } from './commands/comment.js';
 import { registerBatchCommands } from './commands/batch.js';
 import { registerSyncCommand } from './commands/sync.js';
+import { registerContextCommand } from './commands/context.js';
+import { registerAttachmentCommands } from './commands/attachment.js';
+import { registerPrCommand } from './commands/pr.js';
+import { enableJsonMode } from './utils/json-output.js';
 
 const program = new Command();
+
+// Global --json flag handler
+program.hook('preAction', (thisCommand) => {
+  // Check for --json flag in the command or any parent
+  let cmd: Command | null = thisCommand;
+  while (cmd) {
+    if (cmd.opts().json) {
+      enableJsonMode();
+      break;
+    }
+    cmd = cmd.parent;
+  }
+});
 
 program
   .name('linear')
   .description('Command line interface for Linear issue management.\n\nManage issues, create branches, and streamline your workflow without leaving the terminal.')
-  .version('0.2.0')
+  .version('0.0.9')
   .addHelpText('after', `
 Examples:
   $ linear auth login                    # Authenticate with Linear
@@ -54,6 +71,9 @@ registerMeCommand(program);
 registerCommentCommands(program);
 registerBatchCommands(program);
 registerSyncCommand(program);
+registerContextCommand(program);
+registerAttachmentCommands(program);
+registerPrCommand(program);
 
 // Handle unknown commands gracefully
 program.on('command:*', (operands) => {

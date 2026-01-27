@@ -4,6 +4,7 @@ import { getAuthenticatedClient } from '../lib/client.js';
 import { ConfigManager } from '../lib/config.js';
 import { isGitRepo, getIssueFromCurrentBranch, generateBranchName, createBranch, branchExists, } from '../utils/git.js';
 import { formatIdentifier } from '../utils/format.js';
+import { isJsonMode, outputJson, outputJsonError, ExitCodes, } from '../utils/json-output.js';
 export function registerBranchCommand(program) {
     program
         .command('branch [issue]')
@@ -11,13 +12,18 @@ export function registerBranchCommand(program) {
         .option('-s, --style <style>', 'Branch style: feature, kebab, or plain')
         .option('--no-checkout', 'Create branch without switching to it')
         .option('--copy', 'Copy branch name to clipboard instead of creating')
+        .option('--json', 'Output in JSON format')
         .action(async (issueArg, options) => {
         try {
             // Check if we're in a git repo
             if (!isGitRepo() && !options.copy) {
+                if (isJsonMode()) {
+                    outputJsonError('NOT_GIT_REPO', 'Not in a git repository');
+                    process.exit(ExitCodes.GENERAL_ERROR);
+                }
                 console.log(chalk.red('Not in a git repository.'));
                 console.log(chalk.gray('Use --copy to copy the branch name to clipboard instead.'));
-                process.exit(1);
+                process.exit(ExitCodes.GENERAL_ERROR);
             }
             const client = await getAuthenticatedClient();
             const config = ConfigManager.load();
@@ -66,12 +72,30 @@ export function registerBranchCommand(program) {
             });
             const issue = issues.nodes[0];
             if (!issue) {
+                if (isJsonMode()) {
+                    outputJsonError('NOT_FOUND', `Issue "${issueId}" not found`);
+                    process.exit(ExitCodes.NOT_FOUND);
+                }
                 console.log(chalk.red(`Issue "${issueId}" not found.`));
-                process.exit(1);
+                process.exit(ExitCodes.NOT_FOUND);
             }
             // Generate branch name
             const style = (options.style || config.branchStyle || 'feature');
             const branchName = generateBranchName(issue.identifier, issue.title, style);
+            // JSON mode - just output the branch info
+            if (isJsonMode()) {
+                const branchJson = {
+                    name: branchName,
+                    issue: {
+                        id: issue.id,
+                        identifier: issue.identifier,
+                        title: issue.title,
+                        url: issue.url,
+                    },
+                };
+                outputJson(branchJson);
+                return;
+            }
             if (options.copy) {
                 // Copy to clipboard
                 const { execSync } = await import('child_process');
@@ -115,11 +139,15 @@ export function registerBranchCommand(program) {
                 console.log(chalk.gray('\nCancelled.'));
                 return;
             }
+            if (isJsonMode()) {
+                outputJsonError('BRANCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+                process.exit(ExitCodes.GENERAL_ERROR);
+            }
             console.log(chalk.red('Failed to create branch.'));
             if (error instanceof Error) {
                 console.log(chalk.gray(error.message));
             }
-            process.exit(1);
+            process.exit(ExitCodes.GENERAL_ERROR);
         }
     });
 }

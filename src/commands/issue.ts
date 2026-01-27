@@ -11,6 +11,14 @@ import {
   formatIdentifier,
   formatState,
 } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  issueToJson,
+  ExitCodes,
+  type IssueJson,
+} from '../utils/json-output.js';
 
 /**
  * Find an issue by its identifier (e.g., "ENG-123")
@@ -90,6 +98,7 @@ export function registerIssueCommands(program: Command): void {
     .option('-s, --status <status>', 'Filter by status name')
     .option('-a, --assignee <assignee>', 'Filter by assignee (use "me" for yourself)')
     .option('-l, --limit <number>', 'Maximum number of issues to show', '25')
+    .option('--json', 'Output in JSON format')
     .action(async (options) => {
       const client = await getAuthenticatedClient();
       
@@ -120,6 +129,14 @@ export function registerIssueCommands(program: Command): void {
           orderBy: client.constructor.name ? undefined : undefined, // Use default ordering
         });
         
+        if (isJsonMode()) {
+          const issuesJson: IssueJson[] = await Promise.all(
+            issues.nodes.map(iss => issueToJson(iss))
+          );
+          outputJson({ issues: issuesJson, count: issuesJson.length });
+          return;
+        }
+        
         if (issues.nodes.length === 0) {
           console.log(chalk.yellow('No issues found matching your criteria.'));
           return;
@@ -134,11 +151,15 @@ export function registerIssueCommands(program: Command): void {
         console.log('');
         console.log(chalk.gray(`Showing ${issues.nodes.length} issue${issues.nodes.length === 1 ? '' : 's'}`));
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to fetch issues.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 
@@ -154,6 +175,7 @@ export function registerIssueCommands(program: Command): void {
     .option('-p, --priority <priority>', 'Priority (1=Urgent, 2=High, 3=Medium, 4=Low)')
     .option('--project <project>', 'Project name or ID')
     .option('--label <labels>', 'Labels (comma-separated)')
+    .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -303,7 +325,9 @@ export function registerIssueCommands(program: Command): void {
         }
         
         // Create the issue
-        console.log(chalk.gray('Creating issue...'));
+        if (!isJsonMode()) {
+          console.log(chalk.gray('Creating issue...'));
+        }
         
         const issuePayload = await client.createIssue({
           teamId,
@@ -317,25 +341,38 @@ export function registerIssueCommands(program: Command): void {
         const createdIssue = await issuePayload.issue;
         
         if (createdIssue) {
+          if (isJsonMode()) {
+            const issueJson = await issueToJson(createdIssue);
+            outputJson({ issue: issueJson });
+            return;
+          }
           console.log('');
           console.log(chalk.green('Issue created successfully!'));
           console.log('');
           console.log('  ' + formatIdentifier(createdIssue.identifier) + ' ' + createdIssue.title);
           console.log('  ' + chalk.underline(createdIssue.url));
         } else {
+          if (isJsonMode()) {
+            outputJsonError('CREATE_FAILED', 'Failed to create issue');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red('Failed to create issue.'));
-          process.exit(1);
+          process.exit(ExitCodes.GENERAL_ERROR);
         }
       } catch (error) {
         if (error instanceof Error && error.name === 'ExitPromptError') {
           console.log(chalk.gray('\nCancelled.'));
           return;
         }
+        if (isJsonMode()) {
+          outputJsonError('CREATE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to create issue.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 
@@ -345,6 +382,7 @@ export function registerIssueCommands(program: Command): void {
   issue
     .command('view <id>')
     .description('Display issue details')
+    .option('--json', 'Output in JSON format')
     .action(async (id: string) => {
       const client = await getAuthenticatedClient();
       
@@ -352,18 +390,32 @@ export function registerIssueCommands(program: Command): void {
         const issue = await findIssueByIdentifier(client, id);
         
         if (!issue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${id}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Issue "${id}" not found.`));
-          process.exit(1);
+          process.exit(ExitCodes.NOT_FOUND);
+        }
+        
+        if (isJsonMode()) {
+          const issueJson = await issueToJson(issue);
+          outputJson({ issue: issueJson });
+          return;
         }
         
         console.log('');
         console.log(await formatIssueDetails(issue));
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to fetch issue.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 
@@ -381,6 +433,7 @@ export function registerIssueCommands(program: Command): void {
     .option('--project <project>', 'Move to project (use "none" to remove from project)')
     .option('--label <labels>', 'Set labels (comma-separated, replaces existing)')
     .option('--add-label <labels>', 'Add labels (comma-separated)')
+    .option('--json', 'Output in JSON format')
     .action(async (id: string, options) => {
       const client = await getAuthenticatedClient();
       
@@ -389,8 +442,12 @@ export function registerIssueCommands(program: Command): void {
         const issue = await findIssueByIdentifier(client, id);
         
         if (!issue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${id}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Issue "${id}" not found.`));
-          process.exit(1);
+          process.exit(ExitCodes.NOT_FOUND);
         }
         
         // Build update payload
@@ -505,20 +562,43 @@ export function registerIssueCommands(program: Command): void {
         }
         
         if (Object.keys(updateData).length === 0) {
+          if (isJsonMode()) {
+            outputJsonError('NO_UPDATES', 'No updates specified');
+            process.exit(ExitCodes.VALIDATION_ERROR);
+          }
           console.log(chalk.yellow('No updates specified. Use --help to see options.'));
           return;
         }
         
-        console.log(chalk.gray('Updating issue...'));
+        if (!isJsonMode()) {
+          console.log(chalk.gray('Updating issue...'));
+        }
         await issue.update(updateData);
+        
+        // Refetch the issue to get updated state
+        const updatedIssue = await findIssueByIdentifier(client, id);
+        
+        if (isJsonMode()) {
+          if (updatedIssue) {
+            const issueJson = await issueToJson(updatedIssue);
+            outputJson({ issue: issueJson });
+          } else {
+            outputJson({ success: true, identifier: issue.identifier });
+          }
+          return;
+        }
         
         console.log(chalk.green(`Updated ${formatIdentifier(issue.identifier)}`));
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('UPDATE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to update issue.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 
@@ -528,6 +608,7 @@ export function registerIssueCommands(program: Command): void {
   issue
     .command('close <id>')
     .description('Mark issue as completed')
+    .option('--json', 'Output in JSON format')
     .action(async (id: string) => {
       const client = await getAuthenticatedClient();
       
@@ -536,45 +617,81 @@ export function registerIssueCommands(program: Command): void {
         const issue = await findIssueByIdentifier(client, id);
         
         if (!issue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${id}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Issue "${id}" not found.`));
-          process.exit(1);
+          process.exit(ExitCodes.NOT_FOUND);
         }
         
         // Get the team's "completed" state
         const team = await issue.team;
         if (!team) {
+          if (isJsonMode()) {
+            outputJsonError('TEAM_NOT_FOUND', 'Could not find team for this issue');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red('Could not find team for this issue.'));
-          process.exit(1);
+          process.exit(ExitCodes.GENERAL_ERROR);
         }
         
         const states = await team.states();
         const completedState = states.nodes.find(s => s.type === 'completed');
         
         if (!completedState) {
+          if (isJsonMode()) {
+            outputJsonError('STATE_NOT_FOUND', 'Could not find a completed state for this team');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red('Could not find a completed state for this team.'));
-          process.exit(1);
+          process.exit(ExitCodes.GENERAL_ERROR);
         }
         
         const currentState = await issue.state;
         
         if (currentState?.type === 'completed') {
+          if (isJsonMode()) {
+            const issueJson = await issueToJson(issue);
+            outputJson({ issue: issueJson, alreadyClosed: true });
+            return;
+          }
           console.log(chalk.yellow(`${formatIdentifier(issue.identifier)} is already completed.`));
           return;
         }
         
-        console.log(chalk.gray('Closing issue...'));
+        if (!isJsonMode()) {
+          console.log(chalk.gray('Closing issue...'));
+        }
         await issue.update({ stateId: completedState.id });
+        
+        // Refetch to get updated state
+        const closedIssue = await findIssueByIdentifier(client, id);
+        
+        if (isJsonMode()) {
+          if (closedIssue) {
+            const issueJson = await issueToJson(closedIssue);
+            outputJson({ issue: issueJson });
+          } else {
+            outputJson({ success: true, identifier: issue.identifier });
+          }
+          return;
+        }
         
         console.log(
           chalk.green(`Closed ${formatIdentifier(issue.identifier)}`) + 
           ' ' + chalk.gray('->') + ' ' + formatState(completedState)
         );
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('CLOSE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         console.log(chalk.red('Failed to close issue.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 }

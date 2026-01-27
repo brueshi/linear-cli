@@ -356,6 +356,100 @@ No issue created (dry run mode)
 - **Parallel batch processing** (3 concurrent by default) for faster bulk operations
 - **Label auto-creation** works in batch mode
 
+### AI-Powered Issue Updates
+
+Update issues using natural language:
+
+```bash
+# Update status with comment
+linear agent-update ATT-123 "Fixed the bug, ready for review"
+
+# Move to in progress
+linear agent-update ATT-123 "Starting work now"
+
+# Mark as done with summary
+linear agent-update ATT-123 "Completed implementation, tests passing" --auto
+
+# Dry run to preview changes
+linear agent-update ATT-123 "Blocked waiting on API team" --dry-run
+
+# JSON output for scripting
+linear agent-update ATT-123 "Done" --auto --json
+```
+
+The AI interprets natural language to determine:
+- Status changes (done, in progress, in review, blocked)
+- Comments to add
+- Priority changes
+- Label additions/removals
+
+### Attachments
+
+Manage issue attachments:
+
+```bash
+# List attachments on an issue
+linear attachment list ATT-123
+
+# Add a URL attachment
+linear attachment add ATT-123 "https://example.com/screenshot.png"
+linear attachment add ATT-123 "https://example.com/doc.pdf" --title "Design Doc"
+
+# Remove an attachment
+linear attachment remove <attachment-id>
+linear attachment remove <attachment-id> -y  # Skip confirmation
+```
+
+### PR Description Generation
+
+Generate pull request descriptions from Linear issues:
+
+```bash
+# Generate PR title and body
+linear pr ATT-123
+
+# JSON output for scripting
+linear pr ATT-123 --json
+
+# Just the title
+linear pr ATT-123 --title-only
+
+# Just the body
+linear pr ATT-123 --body-only
+
+# Copy to clipboard
+linear pr ATT-123 --copy
+```
+
+The generated PR includes:
+- Link to the Linear issue
+- Issue description
+- Labels and priority
+- Standard PR checklist
+
+### Workspace Context (for Coding Agents)
+
+Get workspace context in JSON format for AI coding agents:
+
+```bash
+# Full workspace context (teams, projects, labels, states)
+linear context
+
+# Filter by team
+linear context --team BE
+
+# Specific data only
+linear context --teams-only
+linear context --projects-only
+linear context --labels-only
+linear context --states-only
+
+# Force refresh from API
+linear context --refresh
+```
+
+This command is designed for coding agents (Cursor, Claude Code) to understand your Linear workspace before creating or updating issues programmatically.
+
 ### Sync
 
 Force refresh the workspace cache:
@@ -437,6 +531,70 @@ Available settings:
 | `enableAgentContext` | Fetch workspace context for AI agent (default: true) |
 | `agentConfirmation` | Show confirmation before AI creates issue (default: true) |
 | `agentModel` | Claude model for agent (default: claude-haiku-4-5-20251001) |
+
+### Machine-Readable Output (JSON)
+
+Most commands support `--json` flag for machine-readable output, making the CLI ideal for scripting and integration with coding agents:
+
+```bash
+# Issue commands
+linear issue list --json
+linear issue view ATT-123 --json
+linear issue create -t ATT --title "Bug" --json
+linear issue update ATT-123 -s done --json
+
+# Comment commands
+linear comment list ATT-123 --json
+linear comment add ATT-123 "Comment" --json
+
+# Project and label commands
+linear project list --json
+linear label list --json
+
+# Branch generation
+linear branch ATT-123 --json
+
+# Workspace context
+linear context --json
+
+# Attachments
+linear attachment list ATT-123 --json
+
+# PR generation
+linear pr ATT-123 --json
+
+# AI-powered updates
+linear agent-update ATT-123 "Done" --auto --json
+```
+
+JSON responses follow a consistent structure:
+
+```json
+{
+  "success": true,
+  "data": { ... }
+}
+```
+
+Or for errors:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Issue not found"
+  }
+}
+```
+
+**Exit Codes:**
+- `0`: Success
+- `1`: General error
+- `2`: Authentication failure
+- `3`: Resource not found
+- `4`: Rate limited
+- `5`: Validation error
 
 ### Shell Completions
 
@@ -544,6 +702,40 @@ lme --due  # Check upcoming deadlines
 | Standalone | ~20-40ms | Pre-compiled binary |
 
 ## Changelog
+
+### v0.0.9
+
+**New Commands:**
+- `linear context` - Get workspace context (teams, projects, labels, states) in JSON format for coding agents
+- `linear attachment` - Manage issue attachments (list, add URL, remove)
+- `linear agent-update` - AI-powered issue updates with natural language
+- `linear pr` - Generate PR title and description from Linear issues
+
+**Machine-Readable Output:**
+- Added `--json` flag to all major commands for scripting and coding agent integration
+- Consistent JSON response structure with success/error format
+- Distinct exit codes: 0 (success), 1 (error), 2 (auth failure), 3 (not found), 4 (rate limited), 5 (validation error)
+
+**Commands with JSON Support:**
+- `linear issue list/view/create/update/close --json`
+- `linear comment list/add --json`
+- `linear project list/view --json`
+- `linear label list --json`
+- `linear branch --json`
+- `linear context --json`
+- `linear attachment list/add/remove --json`
+- `linear pr --json`
+- `linear agent-update --json`
+
+**AI-Powered Updates (`agent-update`):**
+- Natural language issue updates: "Fixed the bug, ready for review"
+- Interprets status changes, comments, priority changes, and label additions
+- Supports `--auto`, `--dry-run`, and `--json` flags
+
+**Coding Agent Integration:**
+- `linear context` provides workspace state for Cursor/Claude Code agents
+- JSON output enables programmatic parsing without regex
+- Exit codes allow proper error handling in scripts
 
 ### v0.0.7
 

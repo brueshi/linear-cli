@@ -165,3 +165,90 @@ export function sanitizeInput(input: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+/**
+ * System prompt for Claude to extract structured update data from natural language
+ */
+export const UPDATE_SYSTEM_PROMPT = `You are an AI assistant that extracts structured issue update data from natural language input.
+
+The user is providing an update about an existing Linear issue. Your task is to parse their input and determine what changes should be made to the issue.
+
+Extract the following fields:
+- comment: Text to add as a comment (if the input describes progress, findings, or information to record)
+- statusChange: New status if mentioned (e.g., "done", "in progress", "in review", "blocked", "cancelled")
+- priorityChange: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low (only if priority change is mentioned)
+- addLabels: Array of labels to add (if mentioned)
+- removeLabels: Array of labels to remove (if mentioned)
+- titleUpdate: New title (only if explicitly requesting a title change)
+- appendDescription: Text to append to description (if mentioned)
+- assigneeChange: "me", "none", or a user name (if assignment change is mentioned)
+- summary: Brief summary of what was done (for comment context)
+
+Guidelines:
+1. Detect status transitions from natural language:
+   - "done", "finished", "completed", "fixed", "resolved" -> status: "done" or "completed"
+   - "starting", "working on", "in progress", "begun" -> status: "in progress"
+   - "ready for review", "needs review", "PR submitted" -> status: "in review"
+   - "blocked", "stuck", "waiting" -> status: "blocked" (if available)
+   - "cancelled", "won't fix", "not doing" -> status: "cancelled"
+2. If the input describes work done or findings, create a meaningful comment
+3. Keep comments informative but concise
+4. Only include fields that are explicitly or strongly implied in the input
+5. For labels, prefer existing workspace labels when context is provided
+
+Return ONLY valid JSON matching this schema, with no additional text:
+{
+  "comment": "string or null",
+  "statusChange": "string or null",
+  "priorityChange": "number 0-4 or null",
+  "addLabels": "array of strings or null",
+  "removeLabels": "array of strings or null",
+  "titleUpdate": "string or null",
+  "appendDescription": "string or null",
+  "assigneeChange": "string or null",
+  "summary": "string or null"
+}`;
+
+/**
+ * Build the update prompt with issue and workspace context
+ */
+export function buildUpdatePrompt(
+  input: string, 
+  issueContext: { identifier: string; title: string; currentStatus: string },
+  workspaceContext?: WorkspaceContext
+): string {
+  const lines: string[] = [];
+  
+  // Add issue context
+  lines.push('Issue being updated:');
+  lines.push(`- Identifier: ${issueContext.identifier}`);
+  lines.push(`- Title: ${issueContext.title}`);
+  lines.push(`- Current Status: ${issueContext.currentStatus}`);
+  lines.push('');
+  
+  // Add workspace context if available
+  if (workspaceContext) {
+    // Add available states
+    if (workspaceContext.states.length > 0) {
+      lines.push('Available workflow states:');
+      for (const state of workspaceContext.states) {
+        lines.push(`- ${state.name} (${state.type})`);
+      }
+      lines.push('');
+    }
+    
+    // Add existing labels
+    if (workspaceContext.labels.length > 0) {
+      lines.push('Existing labels (prefer these):');
+      const labelNames = workspaceContext.labels.slice(0, 20).map(l => l.name);
+      lines.push(labelNames.join(', '));
+      lines.push('');
+    }
+  }
+  
+  // Add user input
+  lines.push('User update message:');
+  lines.push(`"${input}"`);
+  
+  return lines.join('\n');
+}

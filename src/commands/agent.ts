@@ -12,8 +12,16 @@ import { Validator } from '../lib/agent/validator.js';
 import { BatchProcessor, parseBatchInput } from '../lib/agent/batch-processor.js';
 import { TemplateManager } from '../lib/agent/templates.js';
 import { resolveOrCreateLabels } from '../lib/agent/labels.js';
-import type { ExtractedIssueData, AgentOptions, WorkspaceContext } from '../lib/agent/types.js';
+import type { ExtractedIssueData, ExtractedUpdateData, AgentOptions, WorkspaceContext } from '../lib/agent/types.js';
 import { formatIdentifier, divider, formatSuccess, formatWarning } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  issueToJson,
+  commentToJson,
+  ExitCodes,
+} from '../utils/json-output.js';
 
 /**
  * Extended agent options with new features
@@ -810,6 +818,284 @@ Labels mentioned will be auto-created if they don't exist.
     `)
     .action(agentAction);
 
+  // ─────────────────────────────────────────────────────────────────
+  // AGENT UPDATE COMMAND
+  // ─────────────────────────────────────────────────────────────────
+  program
+    .command('agent-update <issue> <input>')
+    .description('Update an issue using natural language with AI')
+    .option('-a, --auto', 'Skip confirmation, apply immediately')
+    .option('-d, --dry-run', 'Show extraction without applying changes')
+    .option('--json', 'Output in JSON format')
+    .addHelpText('after', `
+Examples:
+  $ linear agent-update ABC-123 "Fixed the bug, ready for review"
+  $ linear agent-update ABC-123 "Moving to in progress, starting work now"
+  $ linear agent-update ABC-123 "Completed the implementation, tests passing" --auto
+  $ linear agent-update ABC-123 "Blocked waiting on API team" --dry-run
+
+The agent interprets natural language to determine:
+- Status changes (done, in progress, in review, blocked)
+- Comments to add
+- Priority changes
+- Label additions/removals
+    `)
+    .action(async (issueId: string, input: string, options: { auto?: boolean; dryRun?: boolean }) => {
+      try {
+        // 1. Get Anthropic API key
+        const anthropicApiKey = await AnthropicAuthManager.getApiKey();
+        
+        if (!anthropicApiKey) {
+          if (isJsonMode()) {
+            outputJsonError('AUTH_REQUIRED', 'Anthropic API key not found');
+            process.exit(ExitCodes.AUTH_FAILURE);
+          }
+          console.log(chalk.red('Anthropic API key not found.'));
+          console.log('Run: ' + chalk.cyan('linear agent-auth <your-api-key>'));
+          process.exit(ExitCodes.AUTH_FAILURE);
+        }
+        
+        // 2. Get Linear client
+        const linearClient = await getAuthenticatedClient();
+        
+        // 3. Find the issue
+        const normalizedId = issueId.toUpperCase();
+        const match = normalizedId.match(/^([A-Z]+)-(\d+)$/);
+        
+        if (!match) {
+          if (isJsonMode()) {
+            outputJsonError('INVALID_ID', `Invalid issue identifier: ${issueId}`);
+            process.exit(ExitCodes.VALIDATION_ERROR);
+          }
+          console.log(chalk.red(`Invalid issue identifier: ${issueId}`));
+          process.exit(ExitCodes.VALIDATION_ERROR);
+        }
+        
+        const [, teamKey, numberStr] = match;
+        const issueNumber = parseInt(numberStr, 10);
+        
+        const issues = await linearClient.issues({
+          filter: {
+            team: { key: { eq: teamKey } },
+            number: { eq: issueNumber },
+          },
+          first: 1,
+        });
+        
+        const issue = issues.nodes[0];
+        
+        if (!issue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${issueId}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
+          console.log(chalk.red(`Issue "${issueId}" not found.`));
+          process.exit(ExitCodes.NOT_FOUND);
+        }
+        
+        // 4. Get current issue state
+        const currentState = await issue.state;
+        const currentStatus = currentState?.name || 'Unknown';
+        
+        // 5. Initialize AI client and context engine
+        const aiClient = new AgentAIClient({ apiKey: anthropicApiKey });
+        const contextEngine = new ContextEngine(linearClient);
+        
+        if (!isJsonMode() && !options.dryRun) {
+          process.stdout.write(chalk.gray('Analyzing...'));
+        }
+        
+        // 6. Fetch workspace context
+        let context: WorkspaceContext | undefined;
+        try {
+          context = await contextEngine.fetchContext();
+        } catch {
+          // Continue without context
+        }
+        
+        // 7. Extract update data using AI
+        let extracted: ExtractedUpdateData;
+        try {
+          extracted = await aiClient.extractUpdateData(
+            input,
+            { identifier: issue.identifier, title: issue.title, currentStatus },
+            context
+          );
+        } catch (error) {
+          if (!isJsonMode()) {
+            process.stdout.write('\r' + ' '.repeat(20) + '\r');
+          }
+          if (isJsonMode()) {
+            outputJsonError('AI_FAILED', error instanceof Error ? error.message : 'AI extraction failed');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
+          console.log(chalk.red('Failed to analyze input: ') + (error instanceof Error ? error.message : 'Unknown error'));
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
+        
+        if (!isJsonMode() && !options.dryRun) {
+          process.stdout.write('\r' + ' '.repeat(20) + '\r');
+        }
+        
+        // 8. Dry run - show what would be done
+        if (options.dryRun) {
+          if (isJsonMode()) {
+            outputJson({ 
+              dryRun: true, 
+              issue: { id: issue.id, identifier: issue.identifier },
+              extracted 
+            });
+            return;
+          }
+          
+          console.log('');
+          console.log(chalk.bold.cyan('Dry Run - Extracted Update Data'));
+          console.log(divider(50));
+          console.log('');
+          console.log(chalk.gray('Issue:       ') + formatIdentifier(issue.identifier) + ' ' + issue.title);
+          console.log(chalk.gray('Current:     ') + currentStatus);
+          console.log('');
+          
+          if (extracted.statusChange) {
+            console.log(chalk.gray('Status:      ') + chalk.yellow(`-> ${extracted.statusChange}`));
+          }
+          if (extracted.comment) {
+            console.log(chalk.gray('Comment:     ') + extracted.comment);
+          }
+          if (extracted.priorityChange !== undefined) {
+            const priorityLabels = ['None', 'Urgent', 'High', 'Medium', 'Low'];
+            console.log(chalk.gray('Priority:    ') + chalk.yellow(`-> ${priorityLabels[extracted.priorityChange]}`));
+          }
+          if (extracted.addLabels && extracted.addLabels.length > 0) {
+            console.log(chalk.gray('Add Labels:  ') + extracted.addLabels.join(', '));
+          }
+          if (extracted.assigneeChange) {
+            console.log(chalk.gray('Assignee:    ') + chalk.yellow(`-> ${extracted.assigneeChange}`));
+          }
+          
+          console.log('');
+          console.log(divider(50));
+          console.log(chalk.gray('No changes made (dry run mode)'));
+          return;
+        }
+        
+        // 9. Check if there's anything to do
+        const hasChanges = extracted.comment || 
+                          extracted.statusChange || 
+                          extracted.priorityChange !== undefined ||
+                          extracted.addLabels?.length ||
+                          extracted.assigneeChange ||
+                          extracted.titleUpdate;
+        
+        if (!hasChanges) {
+          if (isJsonMode()) {
+            outputJson({ success: true, message: 'No changes detected', issue: { id: issue.id, identifier: issue.identifier } });
+            return;
+          }
+          console.log(chalk.yellow('No changes detected from input.'));
+          return;
+        }
+        
+        // 10. Apply changes
+        const updateData: Record<string, unknown> = {};
+        const team = await issue.team;
+        
+        // Resolve status change
+        if (extracted.statusChange && team) {
+          const states = await team.states();
+          const newState = states.nodes.find(
+            s => s.name.toLowerCase().includes(extracted.statusChange!.toLowerCase())
+          );
+          if (newState) {
+            updateData.stateId = newState.id;
+          }
+        }
+        
+        // Apply priority change
+        if (extracted.priorityChange !== undefined) {
+          updateData.priority = extracted.priorityChange;
+        }
+        
+        // Apply title update
+        if (extracted.titleUpdate) {
+          updateData.title = extracted.titleUpdate;
+        }
+        
+        // Apply assignee change
+        if (extracted.assigneeChange) {
+          if (extracted.assigneeChange === 'none') {
+            updateData.assigneeId = null;
+          } else if (extracted.assigneeChange === 'me' && context) {
+            updateData.assigneeId = context.user.id;
+          }
+        }
+        
+        // 11. Update issue if there are field changes
+        if (Object.keys(updateData).length > 0) {
+          await issue.update(updateData);
+        }
+        
+        // 12. Add comment if present
+        let createdComment = null;
+        if (extracted.comment) {
+          const commentResult = await linearClient.createComment({
+            issueId: issue.id,
+            body: extracted.comment,
+          });
+          createdComment = await commentResult.comment;
+        }
+        
+        // 13. Output results
+        if (isJsonMode()) {
+          const updatedIssue = await linearClient.issue(issue.id);
+          const issueJson = await issueToJson(updatedIssue);
+          const result: Record<string, unknown> = {
+            success: true,
+            issue: issueJson,
+            changes: {
+              statusChanged: !!extracted.statusChange,
+              commentAdded: !!extracted.comment,
+              priorityChanged: extracted.priorityChange !== undefined,
+            },
+          };
+          if (createdComment) {
+            result.comment = await commentToJson(createdComment);
+          }
+          outputJson(result);
+          return;
+        }
+        
+        console.log('');
+        console.log(formatSuccess(`Updated ${formatIdentifier(issue.identifier)}`));
+        
+        if (extracted.statusChange) {
+          console.log(chalk.gray('  Status: ') + chalk.yellow(`-> ${extracted.statusChange}`));
+        }
+        if (extracted.comment) {
+          console.log(chalk.gray('  Comment added'));
+        }
+        if (extracted.priorityChange !== undefined) {
+          const priorityLabels = ['None', 'Urgent', 'High', 'Medium', 'Low'];
+          console.log(chalk.gray('  Priority: ') + chalk.yellow(`-> ${priorityLabels[extracted.priorityChange]}`));
+        }
+        
+      } catch (error) {
+        if (error instanceof Error && error.name === 'ExitPromptError') {
+          console.log(chalk.gray('\nCancelled.'));
+          return;
+        }
+        if (isJsonMode()) {
+          outputJsonError('UPDATE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
+        console.log(chalk.red('Failed to update issue.'));
+        if (error instanceof Error) {
+          console.log(chalk.gray(error.message));
+        }
+        process.exit(ExitCodes.GENERAL_ERROR);
+      }
+    });
+
   // Separate command for setting Anthropic API key
   program
     .command('agent-auth <api-key>')
@@ -824,7 +1110,7 @@ Labels mentioned will be auto-created if they don't exist.
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }
-        process.exit(1);
+        process.exit(ExitCodes.GENERAL_ERROR);
       }
     });
 

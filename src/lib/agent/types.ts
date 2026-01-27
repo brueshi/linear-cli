@@ -3,6 +3,38 @@
  */
 
 /**
+ * Data extracted from natural language update input by the AI
+ */
+export interface ExtractedUpdateData {
+  /** Comment to add (if any) */
+  comment?: string;
+  
+  /** Status change (workflow state name) */
+  statusChange?: string;
+  
+  /** Priority change: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low */
+  priorityChange?: number;
+  
+  /** Labels to add */
+  addLabels?: string[];
+  
+  /** Labels to remove */
+  removeLabels?: string[];
+  
+  /** Title update (if explicitly requested) */
+  titleUpdate?: string;
+  
+  /** Description to append */
+  appendDescription?: string;
+  
+  /** Assignee change (user name or "me" or "none") */
+  assigneeChange?: string;
+  
+  /** Estimated completion summary (for comment context) */
+  summary?: string;
+}
+
+/**
  * Data extracted from natural language input by the AI
  */
 export interface ExtractedIssueData {
