@@ -1,8 +1,15 @@
-import { secrets } from '../secrets.js';
-
 const SERVICE_NAME = 'linear-cli-anthropic';
 const ACCOUNT_NAME = 'api-key';
 const ENV_VAR_NAME = 'ANTHROPIC_API_KEY';
+
+/**
+ * Lazily import secrets module so that keytar (and its D-Bus dependency)
+ * is never loaded when env var auth is active.
+ */
+async function loadSecrets() {
+  const { secrets } = await import('../secrets.js');
+  return secrets;
+}
 
 /**
  * AnthropicAuthManager handles secure storage and retrieval of Anthropic API keys.
@@ -11,8 +18,8 @@ const ENV_VAR_NAME = 'ANTHROPIC_API_KEY';
  * 1. ANTHROPIC_API_KEY environment variable (for headless/CI/server environments)
  * 2. System keychain via Bun.secrets (Bun runtime) or keytar (Node.js)
  *
- * When ANTHROPIC_API_KEY is set, keytar is never imported for this key,
- * avoiding D-Bus crashes on headless servers without a secrets service.
+ * When ANTHROPIC_API_KEY is set, secrets.ts is never imported, so keytar
+ * is never loaded — avoiding D-Bus crashes on headless servers.
  */
 export const AnthropicAuthManager = {
   /**
@@ -26,6 +33,7 @@ export const AnthropicAuthManager = {
    * Store an Anthropic API key securely in the system keychain
    */
   async saveApiKey(apiKey: string): Promise<void> {
+    const secrets = await loadSecrets();
     await secrets.set(SERVICE_NAME, ACCOUNT_NAME, apiKey);
   },
 
@@ -39,6 +47,7 @@ export const AnthropicAuthManager = {
     if (envKey) {
       return envKey;
     }
+    const secrets = await loadSecrets();
     return secrets.get(SERVICE_NAME, ACCOUNT_NAME);
   },
 
@@ -47,6 +56,7 @@ export const AnthropicAuthManager = {
    * @returns true if a key was deleted, false if no key existed
    */
   async deleteApiKey(): Promise<boolean> {
+    const secrets = await loadSecrets();
     return secrets.delete(SERVICE_NAME, ACCOUNT_NAME);
   },
 
