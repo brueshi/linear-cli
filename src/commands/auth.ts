@@ -14,6 +14,13 @@ export function registerAuthCommands(program: Command): void {
     .description('Store API key securely in keychain')
     .action(async () => {
       try {
+        // Check for environment variable authentication
+        if (AuthManager.isEnvAuth()) {
+          console.log(chalk.green('Authenticated via environment variable LINEAR_API_KEY.'));
+          console.log(chalk.gray('Keychain login is not needed when using env var authentication.'));
+          return;
+        }
+
         // Check if already authenticated
         if (await AuthManager.hasApiKey()) {
           console.log(chalk.yellow('You are already logged in.'));
@@ -35,7 +42,7 @@ export function registerAuthCommands(program: Command): void {
         // Validate the API key by making a test request
         console.log(chalk.gray('Validating API key...'));
         const client = createLinearClient(apiKey.trim());
-        
+
         try {
           const viewer = await client.viewer;
           await AuthManager.saveApiKey(apiKey.trim());
@@ -59,8 +66,14 @@ export function registerAuthCommands(program: Command): void {
     .command('logout')
     .description('Remove stored credentials')
     .action(async () => {
+      if (AuthManager.isEnvAuth()) {
+        console.log(chalk.yellow('Authentication is provided via LINEAR_API_KEY environment variable.'));
+        console.log('Unset the variable to remove access: ' + chalk.cyan('unset LINEAR_API_KEY'));
+        return;
+      }
+
       const deleted = await AuthManager.deleteApiKey();
-      
+
       if (deleted) {
         console.log(chalk.green('Successfully logged out.'));
       } else {
@@ -73,16 +86,17 @@ export function registerAuthCommands(program: Command): void {
     .description('Display current authentication state')
     .action(async () => {
       const hasKey = await AuthManager.hasApiKey();
-      
+
       if (!hasKey) {
         console.log(chalk.yellow('Not authenticated.'));
-        console.log('Run ' + chalk.cyan('linear auth login') + ' to get started.');
+        console.log('Run ' + chalk.cyan('linear auth login') + ' or set ' + chalk.cyan('LINEAR_API_KEY') + ' env var to get started.');
         return;
       }
 
-      // Validate the stored key and show user info
+      // Validate the key and show user info
+      const source = AuthManager.isEnvAuth() ? 'environment variable' : 'system keychain';
       console.log(chalk.gray('Checking authentication...'));
-      
+
       try {
         const apiKey = await AuthManager.getApiKey();
         if (!apiKey) {
@@ -92,19 +106,23 @@ export function registerAuthCommands(program: Command): void {
 
         const client = createLinearClient(apiKey);
         const viewer = await client.viewer;
-        
-        console.log(chalk.green('Authenticated'));
+
+        console.log(chalk.green('Authenticated') + chalk.gray(` (via ${source})`));
         console.log('  User:  ' + chalk.bold(viewer.name || 'Unknown'));
         console.log('  Email: ' + chalk.bold(viewer.email));
-        
+
         // Show organization info if available
         const org = await viewer.organization;
         if (org) {
           console.log('  Org:   ' + chalk.bold(org.name));
         }
       } catch {
-        console.log(chalk.red('Stored API key is invalid or expired.'));
-        console.log('Run ' + chalk.cyan('linear auth logout') + ' then ' + chalk.cyan('linear auth login') + ' to re-authenticate.');
+        console.log(chalk.red('API key is invalid or expired.') + chalk.gray(` (source: ${source})`));
+        if (AuthManager.isEnvAuth()) {
+          console.log('Check that your ' + chalk.cyan('LINEAR_API_KEY') + ' environment variable is correct.');
+        } else {
+          console.log('Run ' + chalk.cyan('linear auth logout') + ' then ' + chalk.cyan('linear auth login') + ' to re-authenticate.');
+        }
       }
     });
 }

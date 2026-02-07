@@ -15,7 +15,7 @@ export async function getAuthenticatedClient() {
     const apiKey = await AuthManager.getApiKey();
     if (!apiKey) {
         console.log(chalk.red('Not authenticated.'));
-        console.log('Run ' + chalk.cyan('linear auth login') + ' to get started.');
+        console.log('Run ' + chalk.cyan('linear auth login') + ' or set ' + chalk.cyan('LINEAR_API_KEY') + ' env var to get started.');
         process.exit(1);
     }
     return createLinearClient(apiKey);

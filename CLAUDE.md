@@ -14,9 +14,11 @@ Before using, ensure the CLI is authenticated:
 linear auth status
 ```
 
-If not authenticated, the developer needs to run `linear auth login` with their Linear API key.
+If not authenticated, the developer needs to either:
+- Run `linear auth login` with their Linear API key, or
+- Set the `LINEAR_API_KEY` environment variable (useful for headless/CI environments)
 
-For AI-powered issue creation (`linear agent`), the Anthropic API key must also be set via `linear agent-auth <key>`.
+For AI-powered issue creation (`linear agent`), the Anthropic API key must also be set via `linear agent-auth <key>` or the `ANTHROPIC_API_KEY` environment variable.
 
 ## Quick Reference
 

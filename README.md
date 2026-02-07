@@ -680,10 +680,64 @@ feature "Add export to CSV, frontend"
 lme --due  # Check upcoming deadlines
 ```
 
+## Headless / CI / Server Usage
+
+On headless servers (VPS, Docker containers, CI runners) without a desktop keychain or D-Bus secrets service, use environment variables instead of `linear auth login`:
+
+```bash
+# Set your Linear API key
+export LINEAR_API_KEY=lin_api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# All commands work non-interactively
+linear issue list
+linear issue view ATT-123
+linear comment add ATT-123 "Deployed to staging"
+linear agent "Fix auth bug, urgent" --auto  # also needs ANTHROPIC_API_KEY
+
+# For AI-powered commands (agent, agent-update)
+export ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+linear agent "Production bug in auth service" --auto
+```
+
+### How It Works
+
+When `LINEAR_API_KEY` is set, the CLI:
+
+1. Uses it directly as the auth token
+2. Never imports or initializes `keytar` (avoids D-Bus dependency)
+3. Skips interactive prompts in `linear auth login`/`logout`
+4. All existing keychain-based auth flows remain unchanged when env vars are absent
+
+### Docker Example
+
+```dockerfile
+FROM node:20-slim
+RUN npm install -g @brueshi/linear-cli
+ENV LINEAR_API_KEY=lin_api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+CMD ["linear", "issue", "list", "--json"]
+```
+
+### CI/CD Example (GitHub Actions)
+
+```yaml
+- name: Update Linear issue
+  env:
+    LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+  run: |
+    npx @brueshi/linear-cli issue update ATT-123 -s done
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `LINEAR_API_KEY` | Yes | Linear API key (replaces `linear auth login`) |
+| `ANTHROPIC_API_KEY` | No | Anthropic API key for `agent` commands (replaces `linear agent-auth`) |
+
 ## Security
 
 - API keys are stored securely in your system keychain (macOS Keychain, Windows Credential Vault, or libsecret on Linux)
-- No credentials are ever written to plain text files
+- Environment variable authentication available for headless/CI environments
 - No telemetry or data collection
 - AI input is sanitized to prevent prompt injection
 

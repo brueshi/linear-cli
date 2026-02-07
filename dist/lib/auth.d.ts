@@ -1,18 +1,25 @@
 /**
- * AuthManager handles secure storage and retrieval of Linear API keys
- * using the system's native credential storage.
+ * AuthManager handles secure storage and retrieval of Linear API keys.
  *
- * Uses Bun.secrets when running under Bun, keytar for Node.js.
- * Both use the same underlying OS keychain APIs, so credentials
- * are interoperable between runtimes.
+ * Priority order:
+ * 1. LINEAR_API_KEY environment variable (for headless/CI/server environments)
+ * 2. System keychain via Bun.secrets (Bun runtime) or keytar (Node.js)
+ *
+ * When LINEAR_API_KEY is set, keytar is never imported, avoiding D-Bus
+ * crashes on headless servers without a secrets service.
  */
 export declare const AuthManager: {
+    /**
+     * Check if authentication is provided via environment variable.
+     */
+    isEnvAuth(): boolean;
     /**
      * Store an API key securely in the system keychain
      */
     saveApiKey(apiKey: string): Promise<void>;
     /**
-     * Retrieve the stored API key from the system keychain
+     * Retrieve the API key. Checks LINEAR_API_KEY env var first,
+     * then falls back to the system keychain.
      * @returns The API key if found, null otherwise
      */
     getApiKey(): Promise<string | null>;
@@ -22,7 +29,7 @@ export declare const AuthManager: {
      */
     deleteApiKey(): Promise<boolean>;
     /**
-     * Check if an API key is currently stored
+     * Check if an API key is available (via env var or keychain)
      */
     hasApiKey(): Promise<boolean>;
 };

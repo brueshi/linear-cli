@@ -177,6 +177,7 @@ async function agentAction(input: string, options: ExtendedAgentOptions): Promis
       console.log('Get one at: ' + chalk.cyan('https://console.anthropic.com/settings/keys'));
       console.log('');
       console.log('Then run: ' + chalk.cyan('linear agent-auth <your-api-key>'));
+      console.log('Or set:  ' + chalk.cyan('export ANTHROPIC_API_KEY=<your-api-key>'));
       process.exit(1);
     }
     
@@ -852,6 +853,7 @@ The agent interprets natural language to determine:
           }
           console.log(chalk.red('Anthropic API key not found.'));
           console.log('Run: ' + chalk.cyan('linear agent-auth <your-api-key>'));
+          console.log('Or set: ' + chalk.cyan('export ANTHROPIC_API_KEY=<your-api-key>'));
           process.exit(ExitCodes.AUTH_FAILURE);
         }
         
