@@ -54,17 +54,17 @@ Guidelines:
    - backend, BE, server, api -> likely backend team
    - frontend, FE, UI, client -> likely frontend team
    - devops, ops, infra, infrastructure -> likely ops team
-9. For project assignment:
-   - Match against available workspace projects (case-insensitive partial match)
-   - Look for project names or keywords in the input
-   - Common patterns to match:
-     * "Features" or "feature" -> match projects with "Features" in the name
-     * "AI Service" or "ai" or "service" -> match projects with "AI Service" in the name
-     * "UI" or "ui fixes" or "frontend fixes" -> match projects with "UI" in the name
-     * "Bugs" or "bug fixes" -> match projects with "Bug" or "Fixes" in the name
+9. For project assignment (IMPORTANT - always try to assign a project when projects are available):
+   - You MUST assign a projectName when workspace projects are available, unless the issue truly doesn't fit any project
+   - Use project descriptions and recent issue patterns to determine the best fit
+   - Study which projects recent issues were assigned to - this reveals how the workspace organizes work
+   - Match by topic/domain, not just keyword:
+     * A bug in the API layer should go to whichever project handles API/backend work
+     * A new UI feature should go to whichever project handles frontend/UI work
    - If the issue type is a bug and there's a bug-related project, prefer that project
    - If the issue type is a feature and there's a features project, prefer that project
    - If multiple projects could match, choose the most specific one
+   - When in doubt, look at which project similar recent issues were assigned to
 
 Return ONLY valid JSON matching this exact schema, with no additional text or markdown:
 {
@@ -94,11 +94,23 @@ export function buildContextPrompt(context: WorkspaceContext): string {
     lines.push('');
   }
   
-  // Add available projects
+  // Add available projects with descriptions and team info
   if (context.projects.length > 0) {
-    lines.push('Available projects in this workspace:');
-    for (const project of context.projects.slice(0, 10)) {
-      lines.push(`- ${project.name}`);
+    // Filter to active projects (started, planned, or backlog)
+    const activeProjects = context.projects.filter(p =>
+      ['started', 'planned', 'backlog'].includes(p.state)
+    );
+    const projectsToShow = activeProjects.length > 0 ? activeProjects : context.projects;
+
+    lines.push('Available projects in this workspace (you SHOULD assign one):');
+    for (const project of projectsToShow.slice(0, 15)) {
+      const teamNames = context.teams
+        .filter(t => project.teamIds.includes(t.id))
+        .map(t => t.key)
+        .join(', ');
+      const teamSuffix = teamNames ? ` [Team: ${teamNames}]` : '';
+      const desc = project.description ? ` - ${project.description.slice(0, 100)}` : '';
+      lines.push(`- "${project.name}"${teamSuffix}${desc}`);
     }
     lines.push('');
   }
@@ -113,12 +125,13 @@ export function buildContextPrompt(context: WorkspaceContext): string {
     lines.push('');
   }
   
-  // Add recent issue patterns for context
+  // Add recent issue patterns for context (including project assignments)
   if (context.recentIssues.length > 0) {
-    lines.push('Recent issue patterns in this workspace:');
-    for (const issue of context.recentIssues.slice(0, 5)) {
+    lines.push('Recent issues (use these to understand project assignment patterns):');
+    for (const issue of context.recentIssues.slice(0, 8)) {
       const priorityLabel = ['None', 'Urgent', 'High', 'Medium', 'Low'][issue.priority] || 'None';
-      lines.push(`- "${issue.title}" (Team: ${issue.teamKey}, Priority: ${priorityLabel})`);
+      const projectSuffix = issue.projectName ? `, Project: "${issue.projectName}"` : '';
+      lines.push(`- "${issue.title}" (Team: ${issue.teamKey}, Priority: ${priorityLabel}${projectSuffix})`);
     }
     lines.push('');
   }

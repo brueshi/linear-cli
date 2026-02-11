@@ -331,8 +331,9 @@ export function registerIssueCommands(program) {
     issue
         .command('view <id>')
         .description('Display issue details')
+        .option('-c, --comments', 'Include comments')
         .option('--json', 'Output in JSON format')
-        .action(async (id) => {
+        .action(async (id, options) => {
         const client = await getAuthenticatedClient();
         try {
             const issue = await findIssueByIdentifier(client, id);
@@ -344,13 +345,22 @@ export function registerIssueCommands(program) {
                 console.log(chalk.red(`Issue "${id}" not found.`));
                 process.exit(ExitCodes.NOT_FOUND);
             }
+            // Fetch comments if requested
+            let comments;
+            if (options.comments) {
+                const result = await issue.comments({
+                    first: 50,
+                    orderBy: { createdAt: 'ascending' },
+                });
+                comments = result.nodes;
+            }
             if (isJsonMode()) {
-                const issueJson = await issueToJson(issue);
+                const issueJson = await issueToJson(issue, { includeComments: !!options.comments, comments });
                 outputJson({ issue: issueJson });
                 return;
             }
             console.log('');
-            console.log(await formatIssueDetails(issue));
+            console.log(await formatIssueDetails(issue, { comments }));
         }
         catch (error) {
             if (isJsonMode()) {

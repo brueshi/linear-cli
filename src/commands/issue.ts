@@ -382,13 +382,14 @@ export function registerIssueCommands(program: Command): void {
   issue
     .command('view <id>')
     .description('Display issue details')
+    .option('-c, --comments', 'Include comments')
     .option('--json', 'Output in JSON format')
-    .action(async (id: string) => {
+    .action(async (id: string, options) => {
       const client = await getAuthenticatedClient();
-      
+
       try {
         const issue = await findIssueByIdentifier(client, id);
-        
+
         if (!issue) {
           if (isJsonMode()) {
             outputJsonError('NOT_FOUND', `Issue "${id}" not found`);
@@ -397,15 +398,25 @@ export function registerIssueCommands(program: Command): void {
           console.log(chalk.red(`Issue "${id}" not found.`));
           process.exit(ExitCodes.NOT_FOUND);
         }
-        
+
+        // Fetch comments if requested
+        let comments;
+        if (options.comments) {
+          const result = await issue.comments({
+            first: 50,
+            orderBy: { createdAt: 'ascending' } as unknown as undefined,
+          });
+          comments = result.nodes;
+        }
+
         if (isJsonMode()) {
-          const issueJson = await issueToJson(issue);
+          const issueJson = await issueToJson(issue, { includeComments: !!options.comments, comments });
           outputJson({ issue: issueJson });
           return;
         }
-        
+
         console.log('');
-        console.log(await formatIssueDetails(issue));
+        console.log(await formatIssueDetails(issue, { comments }));
       } catch (error) {
         if (isJsonMode()) {
           outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');

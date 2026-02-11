@@ -120,7 +120,7 @@ export async function formatIssueRow(issue) {
 /**
  * Format a detailed issue view
  */
-export async function formatIssueDetails(issue) {
+export async function formatIssueDetails(issue, options) {
     const state = await issue.state;
     const assignee = await issue.assignee;
     const team = await issue.team;
@@ -152,8 +152,30 @@ export async function formatIssueDetails(issue) {
         lines.push(chalk.gray('Description:'));
         lines.push(issue.description);
     }
+    // Comments
+    if (options?.comments) {
+        lines.push('');
+        lines.push(chalk.gray('─'.repeat(60)));
+        lines.push(chalk.bold(`Comments (${options.comments.length})`));
+        lines.push('');
+        if (options.comments.length === 0) {
+            lines.push(chalk.gray('  No comments.'));
+        }
+        else {
+            for (const c of options.comments) {
+                const user = await c.user;
+                const userName = user?.name || user?.email || 'Unknown';
+                const resolved = c.resolvedAt ? chalk.green(' [Resolved]') : '';
+                lines.push(chalk.cyan(userName) + chalk.gray(` - ${formatTimeAgo(c.createdAt)}`) + resolved);
+                const body = c.body || '';
+                for (const bodyLine of body.split('\n')) {
+                    lines.push(chalk.white(`  ${bodyLine}`));
+                }
+                lines.push('');
+            }
+        }
+    }
     // URL
-    lines.push('');
     lines.push(chalk.gray('URL: ') + chalk.underline(issue.url));
     return lines.join('\n');
 }

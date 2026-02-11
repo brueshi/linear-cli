@@ -130,21 +130,23 @@ export class ContextEngine {
         first: 50,
         orderBy: this.client.constructor.name ? undefined : undefined,
       });
-      
+
       const result: WorkspaceContext['projects'] = [];
-      
+
       for (const project of projects.nodes) {
         // Get team associations for this project
         const teams = await project.teams();
         const teamIds = teams.nodes.map(t => t.id);
-        
+
         result.push({
           id: project.id,
           name: project.name,
+          description: project.description || undefined,
+          state: project.state,
           teamIds,
         });
       }
-      
+
       return result;
     } catch {
       return [];
@@ -197,21 +199,22 @@ export class ContextEngine {
         first: MAX_RECENT_ISSUES,
         orderBy: this.client.constructor.name ? undefined : undefined,
       });
-      
+
       const result: WorkspaceContext['recentIssues'] = [];
-      
+
       for (const issue of issues.nodes) {
-        const team = await issue.team;
+        const [team, project] = await Promise.all([issue.team, issue.project]);
         if (team) {
           result.push({
             id: issue.id,
             title: issue.title,
             teamKey: team.key,
             priority: issue.priority,
+            projectName: project?.name,
           });
         }
       }
-      
+
       return result;
     } catch {
       return [];

@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { Issue, WorkflowState, User } from '@linear/sdk';
+import type { Issue, WorkflowState, User, Comment } from '@linear/sdk';
 
 /**
  * Box drawing characters for panels
@@ -134,53 +134,85 @@ export async function formatIssueRow(issue: Issue): Promise<string> {
 }
 
 /**
+ * Options for issue detail formatting
+ */
+export interface FormatIssueDetailsOptions {
+  comments?: Comment[];
+}
+
+/**
  * Format a detailed issue view
  */
-export async function formatIssueDetails(issue: Issue): Promise<string> {
+export async function formatIssueDetails(issue: Issue, options?: FormatIssueDetailsOptions): Promise<string> {
   const state = await issue.state;
   const assignee = await issue.assignee;
   const team = await issue.team;
   const project = await issue.project;
   const labels = await issue.labels();
-  
+
   const lines: string[] = [];
-  
+
   // Header
   lines.push(chalk.bold(formatIdentifier(issue.identifier) + ' ' + issue.title));
   lines.push('');
-  
+
   // Metadata table
   lines.push(chalk.gray('Status:    ') + (state ? formatState(state) : chalk.gray('Unknown')));
   lines.push(chalk.gray('Priority:  ') + formatPriority(issue.priority));
   lines.push(chalk.gray('Assignee:  ') + formatAssignee(assignee));
   lines.push(chalk.gray('Team:      ') + (team ? team.name : chalk.gray('-')));
-  
+
   if (project) {
     lines.push(chalk.gray('Project:   ') + project.name);
   }
-  
+
   if (labels.nodes.length > 0) {
     const labelNames = labels.nodes.map(l => chalk.magenta(l.name)).join(', ');
     lines.push(chalk.gray('Labels:    ') + labelNames);
   }
-  
+
   lines.push(chalk.gray('Created:   ') + formatDate(issue.createdAt));
-  
+
   if (issue.dueDate) {
     lines.push(chalk.gray('Due:       ') + formatDate(new Date(issue.dueDate)));
   }
-  
+
   // Description
   if (issue.description) {
     lines.push('');
     lines.push(chalk.gray('Description:'));
     lines.push(issue.description);
   }
-  
+
+  // Comments
+  if (options?.comments) {
+    lines.push('');
+    lines.push(chalk.gray('─'.repeat(60)));
+    lines.push(chalk.bold(`Comments (${options.comments.length})`));
+    lines.push('');
+
+    if (options.comments.length === 0) {
+      lines.push(chalk.gray('  No comments.'));
+    } else {
+      for (const c of options.comments) {
+        const user = await c.user;
+        const userName = user?.name || user?.email || 'Unknown';
+        const resolved = c.resolvedAt ? chalk.green(' [Resolved]') : '';
+
+        lines.push(chalk.cyan(userName) + chalk.gray(` - ${formatTimeAgo(c.createdAt)}`) + resolved);
+
+        const body = c.body || '';
+        for (const bodyLine of body.split('\n')) {
+          lines.push(chalk.white(`  ${bodyLine}`));
+        }
+        lines.push('');
+      }
+    }
+  }
+
   // URL
-  lines.push('');
   lines.push(chalk.gray('URL: ') + chalk.underline(issue.url));
-  
+
   return lines.join('\n');
 }
 

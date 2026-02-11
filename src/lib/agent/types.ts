@@ -89,25 +89,28 @@ export interface WorkspaceContext {
   projects: Array<{
     id: string;
     name: string;
+    description?: string;
+    state: string;
     teamIds: string[];
   }>;
-  
+
   labels: Array<{
     id: string;
     name: string;
   }>;
-  
+
   states: Array<{
     id: string;
     name: string;
     type: string;
   }>;
-  
+
   recentIssues: Array<{
     id: string;
     title: string;
     teamKey: string;
     priority: number;
+    projectName?: string;
   }>;
   
   user: {

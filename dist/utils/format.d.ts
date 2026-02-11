@@ -1,4 +1,4 @@
-import type { Issue, WorkflowState, User } from '@linear/sdk';
+import type { Issue, WorkflowState, User, Comment } from '@linear/sdk';
 /**
  * Box drawing characters for panels
  */
@@ -49,9 +49,15 @@ export declare function truncate(text: string, maxLength: number): string;
  */
 export declare function formatIssueRow(issue: Issue): Promise<string>;
 /**
+ * Options for issue detail formatting
+ */
+export interface FormatIssueDetailsOptions {
+    comments?: Comment[];
+}
+/**
  * Format a detailed issue view
  */
-export declare function formatIssueDetails(issue: Issue): Promise<string>;
+export declare function formatIssueDetails(issue: Issue, options?: FormatIssueDetailsOptions): Promise<string>;
 /**
  * Print a list header
  */

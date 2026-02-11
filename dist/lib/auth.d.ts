@@ -5,8 +5,8 @@
  * 1. LINEAR_API_KEY environment variable (for headless/CI/server environments)
  * 2. System keychain via Bun.secrets (Bun runtime) or keytar (Node.js)
  *
- * When LINEAR_API_KEY is set, keytar is never imported, avoiding D-Bus
- * crashes on headless servers without a secrets service.
+ * When LINEAR_API_KEY is set, secrets.ts is never imported, so keytar
+ * is never loaded — avoiding D-Bus crashes on headless servers.
  */
 export declare const AuthManager: {
     /**

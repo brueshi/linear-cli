@@ -82,6 +82,7 @@ export interface IssueJson {
     name: string;
     email: string;
   };
+  comments?: CommentJson[];
 }
 
 /**
@@ -280,9 +281,17 @@ const PRIORITY_LABELS: Record<number, string> = {
 };
 
 /**
+ * Options for issueToJson conversion
+ */
+export interface IssueToJsonOptions {
+  includeComments?: boolean;
+  comments?: Comment[];
+}
+
+/**
  * Convert Linear SDK Issue to JSON format
  */
-export async function issueToJson(issue: Issue): Promise<IssueJson> {
+export async function issueToJson(issue: Issue, options?: IssueToJsonOptions): Promise<IssueJson> {
   const [state, team, project, labels, assignee, creator] = await Promise.all([
     issue.state,
     issue.team,
@@ -292,7 +301,7 @@ export async function issueToJson(issue: Issue): Promise<IssueJson> {
     issue.creator,
   ]);
 
-  return {
+  const result: IssueJson = {
     id: issue.id,
     identifier: issue.identifier,
     title: issue.title,
@@ -342,6 +351,13 @@ export async function issueToJson(issue: Issue): Promise<IssueJson> {
       email: creator.email || '',
     } : undefined,
   };
+
+  if (options?.includeComments) {
+    const commentNodes = options.comments ?? (await issue.comments({ first: 50 })).nodes;
+    result.comments = await Promise.all(commentNodes.map(c => commentToJson(c)));
+  }
+
+  return result;
 }
 
 /**
