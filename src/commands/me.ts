@@ -2,6 +2,14 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { getAuthenticatedClient } from '../lib/client.js';
 import { formatIdentifier, formatPriority, formatState, truncate, formatDate } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  issueToJson,
+  ExitCodes,
+  type IssueJson,
+} from '../utils/json-output.js';
 
 /**
  * Register the 'me' command for personal dashboard
@@ -14,19 +22,111 @@ export function registerMeCommand(program: Command): void {
     .option('--created', 'Show only issues you created')
     .option('--due', 'Show only issues with upcoming due dates')
     .option('--limit <number>', 'Maximum issues per section', '10')
+    .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
         const client = await getAuthenticatedClient();
         const viewer = await client.viewer;
         const limit = parseInt(options.limit) || 10;
 
+        // Determine what sections to show
+        const showAll = !options.assigned && !options.created && !options.due;
+
+        if (isJsonMode()) {
+          const result: Record<string, unknown> = {
+            user: {
+              id: viewer.id,
+              name: viewer.name || '',
+              email: viewer.email || '',
+            },
+          };
+
+          if (showAll || options.assigned) {
+            const activeIssues = await client.issues({
+              filter: {
+                assignee: { id: { eq: viewer.id } },
+                state: { type: { nin: ['completed', 'canceled'] } },
+              },
+              first: limit * 3,
+            });
+            result.assigned = await Promise.all(
+              activeIssues.nodes.map(i => issueToJson(i))
+            );
+          }
+
+          if (options.created) {
+            const createdIssues = await client.issues({
+              filter: { creator: { id: { eq: viewer.id } } },
+              first: limit,
+            });
+            result.created = await Promise.all(
+              createdIssues.nodes.map(i => issueToJson(i))
+            );
+          }
+
+          if (showAll || options.due) {
+            const now = new Date();
+            const twoWeeks = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+            const dueIssues = await client.issues({
+              filter: {
+                assignee: { id: { eq: viewer.id } },
+                dueDate: {
+                  gte: now.toISOString().split('T')[0],
+                  lte: twoWeeks.toISOString().split('T')[0],
+                },
+                state: { type: { nin: ['completed', 'canceled'] } },
+              },
+              first: limit,
+            });
+            result.due = await Promise.all(
+              dueIssues.nodes.map(i => issueToJson(i))
+            );
+          }
+
+          if (showAll) {
+            const weekAgo = new Date();
+            weekAgo.setDate(weekAgo.getDate() - 7);
+
+            const [activeCount, completedThisWeek, highPriority] = await Promise.all([
+              client.issues({
+                filter: {
+                  assignee: { id: { eq: viewer.id } },
+                  state: { type: { nin: ['completed', 'canceled'] } },
+                },
+                first: 100,
+              }),
+              client.issues({
+                filter: {
+                  assignee: { id: { eq: viewer.id } },
+                  completedAt: { gte: weekAgo.toISOString() },
+                },
+                first: 100,
+              }),
+              client.issues({
+                filter: {
+                  assignee: { id: { eq: viewer.id } },
+                  priority: { in: [1, 2] },
+                  state: { type: { nin: ['completed', 'canceled'] } },
+                },
+                first: 100,
+              }),
+            ]);
+
+            result.summary = {
+              activeIssues: activeCount.nodes.length,
+              completedThisWeek: completedThisWeek.nodes.length,
+              highPriority: highPriority.nodes.length,
+            };
+          }
+
+          outputJson(result);
+          return;
+        }
+
         // Header
         console.log(chalk.bold.cyan(`\n  ${viewer.name || viewer.email}`));
         console.log(chalk.gray(`  ${viewer.email}`));
         console.log('');
-
-        // Determine what sections to show
-        const showAll = !options.assigned && !options.created && !options.due;
 
         // Assigned Issues
         if (showAll || options.assigned) {
@@ -49,6 +149,10 @@ export function registerMeCommand(program: Command): void {
         }
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         if (error instanceof Error) {
           console.log(chalk.red(`Error: ${error.message}`));
         } else {
@@ -75,8 +179,7 @@ async function showAssignedIssues(client: Awaited<ReturnType<typeof getAuthentic
       },
     },
     first: limit * 2, // Fetch more to allow grouping
-    orderBy: { updatedAt: 'descending' } as unknown as undefined,
-  });
+      });
 
   if (activeIssues.nodes.length === 0) {
     console.log(chalk.gray('  No active issues assigned to you.'));
@@ -139,8 +242,7 @@ async function showCreatedIssues(client: Awaited<ReturnType<typeof getAuthentica
       creator: { id: { eq: userId } },
     },
     first: limit,
-    orderBy: { createdAt: 'descending' } as unknown as undefined,
-  });
+      });
 
   if (createdIssues.nodes.length === 0) {
     console.log(chalk.gray('  No issues created by you.'));
@@ -178,8 +280,7 @@ async function showDueSoon(client: Awaited<ReturnType<typeof getAuthenticatedCli
       },
     },
     first: limit,
-    orderBy: { dueDate: 'ascending' } as unknown as undefined,
-  });
+      });
 
   if (dueIssues.nodes.length === 0) {
     console.log(chalk.gray('  No issues due in the next 2 weeks.'));
@@ -221,40 +322,37 @@ async function showSummaryStats(client: Awaited<ReturnType<typeof getAuthenticat
   console.log(chalk.bold('  Summary'));
   console.log(chalk.gray('  ' + '-'.repeat(50)));
 
-  // Count active issues
-  const activeCount = await client.issues({
-    filter: {
-      assignee: { id: { eq: userId } },
-      state: { type: { nin: ['completed', 'canceled'] } },
-    },
-    first: 1,
-  });
-
-  // Count completed this week
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const completedThisWeek = await client.issues({
-    filter: {
-      assignee: { id: { eq: userId } },
-      completedAt: { gte: weekAgo.toISOString() },
-    },
-    first: 100,
-  });
+  const [activeCount, completedThisWeek, highPriority] = await Promise.all([
+    client.issues({
+      filter: {
+        assignee: { id: { eq: userId } },
+        state: { type: { nin: ['completed', 'canceled'] } },
+      },
+      first: 100,
+    }),
+    client.issues({
+      filter: {
+        assignee: { id: { eq: userId } },
+        completedAt: { gte: weekAgo.toISOString() },
+      },
+      first: 100,
+    }),
+    client.issues({
+      filter: {
+        assignee: { id: { eq: userId } },
+        priority: { in: [1, 2] },
+        state: { type: { nin: ['completed', 'canceled'] } },
+      },
+      first: 100,
+    }),
+  ]);
 
-  // Count high priority
-  const highPriority = await client.issues({
-    filter: {
-      assignee: { id: { eq: userId } },
-      priority: { in: [1, 2] }, // Urgent and High
-      state: { type: { nin: ['completed', 'canceled'] } },
-    },
-    first: 1,
-  });
-
-  console.log(`  ${chalk.cyan('Active issues:')}     ${activeCount.nodes.length > 0 ? '50+' : '0'}`);
+  console.log(`  ${chalk.cyan('Active issues:')}     ${activeCount.nodes.length}`);
   console.log(`  ${chalk.green('Completed (7d):')}   ${completedThisWeek.nodes.length}`);
-  console.log(`  ${chalk.yellow('High priority:')}    ${highPriority.nodes.length > 0 ? '1+' : '0'}`);
+  console.log(`  ${chalk.yellow('High priority:')}    ${highPriority.nodes.length}`);
   console.log('');
 }
 

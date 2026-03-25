@@ -5,7 +5,7 @@
  * without needing regex or text parsing.
  */
 
-import type { Issue, WorkflowState, User, Project, IssueLabel, Comment, Attachment } from '@linear/sdk';
+import type { Issue, WorkflowState, User, Project, IssueLabel, Comment, Attachment, Cycle, Document, IssueRelation, ProjectUpdate, IssueSearchResult, DocumentSearchResult } from '@linear/sdk';
 
 // ─────────────────────────────────────────────────────────────────
 // Exit Codes
@@ -361,6 +361,91 @@ export async function issueToJson(issue: Issue, options?: IssueToJsonOptions): P
 }
 
 /**
+ * Convert Linear SDK IssueSearchResult to JSON format.
+ * IssueSearchResult has the same shape as Issue but is a different class.
+ */
+export async function issueSearchResultToJson(issue: IssueSearchResult): Promise<IssueJson> {
+  const [state, team, project, assignee, creator] = await Promise.all([
+    issue.state,
+    issue.team,
+    issue.project,
+    issue.assignee,
+    issue.creator,
+  ]);
+
+  return {
+    id: issue.id,
+    identifier: issue.identifier,
+    title: issue.title,
+    description: issue.description || undefined,
+    url: issue.url,
+    priority: issue.priority,
+    priorityLabel: issue.priorityLabel || PRIORITY_LABELS[issue.priority] || 'Unknown',
+    estimate: issue.estimate || undefined,
+    dueDate: issue.dueDate || undefined,
+    createdAt: issue.createdAt.toISOString(),
+    updatedAt: issue.updatedAt.toISOString(),
+    status: state ? {
+      id: state.id,
+      name: state.name,
+      type: state.type,
+    } : { id: '', name: 'Unknown', type: 'unknown' },
+    team: team ? {
+      id: team.id,
+      key: team.key,
+      name: team.name,
+    } : { id: '', key: '', name: 'Unknown' },
+    project: project ? {
+      id: project.id,
+      name: project.name,
+    } : undefined,
+    labels: issue.labelIds.map((id: string) => ({
+      id,
+      name: '',
+    })),
+    assignee: assignee ? {
+      id: assignee.id,
+      name: assignee.name || assignee.displayName || '',
+      email: assignee.email || '',
+    } : undefined,
+    creator: creator ? {
+      id: creator.id,
+      name: creator.name || creator.displayName || '',
+      email: creator.email || '',
+    } : undefined,
+  };
+}
+
+/**
+ * Convert Linear SDK DocumentSearchResult to DocumentJson format.
+ */
+export async function documentSearchResultToJson(doc: DocumentSearchResult): Promise<DocumentJson> {
+  const project = await doc.project;
+  const creator = await doc.creator;
+
+  return {
+    id: doc.id,
+    title: doc.title,
+    content: doc.content || undefined,
+    icon: doc.icon || undefined,
+    color: doc.color || undefined,
+    slugId: doc.slugId,
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString(),
+    url: doc.url,
+    project: project ? {
+      id: project.id,
+      name: project.name,
+    } : undefined,
+    creator: creator ? {
+      id: creator.id,
+      name: creator.name || creator.displayName || '',
+      email: creator.email || '',
+    } : undefined,
+  };
+}
+
+/**
  * Convert Linear SDK Comment to JSON format
  */
 export async function commentToJson(comment: Comment): Promise<CommentJson> {
@@ -464,5 +549,214 @@ export function userToJson(user: User): { id: string; name: string; email: strin
     id: user.id,
     name: user.name || user.displayName || '',
     email: user.email || '',
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Cycle Types & Converters
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Cycle data in JSON format
+ */
+export interface CycleJson {
+  id: string;
+  number: number;
+  name?: string;
+  description?: string;
+  startsAt: string;
+  endsAt: string;
+  completedAt?: string;
+  progress: number;
+  issueCountHistory: number[];
+  completedIssueCountHistory: number[];
+  isActive: boolean;
+  team: {
+    id: string;
+    key: string;
+    name: string;
+  };
+}
+
+/**
+ * Convert Linear SDK Cycle to JSON format
+ */
+export async function cycleToJson(cycle: Cycle): Promise<CycleJson> {
+  const team = await cycle.team;
+
+  return {
+    id: cycle.id,
+    number: cycle.number,
+    name: cycle.name || undefined,
+    description: cycle.description || undefined,
+    startsAt: cycle.startsAt.toISOString(),
+    endsAt: cycle.endsAt.toISOString(),
+    completedAt: cycle.completedAt?.toISOString(),
+    progress: cycle.progress,
+    issueCountHistory: cycle.issueCountHistory,
+    completedIssueCountHistory: cycle.completedIssueCountHistory,
+    isActive: cycle.isActive,
+    team: team ? {
+      id: team.id,
+      key: team.key,
+      name: team.name,
+    } : { id: '', key: '', name: 'Unknown' },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Document Types & Converters
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Document data in JSON format
+ */
+export interface DocumentJson {
+  id: string;
+  title: string;
+  content?: string;
+  icon?: string;
+  color?: string;
+  slugId: string;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  project?: {
+    id: string;
+    name: string;
+  };
+  creator?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+}
+
+/**
+ * Convert Linear SDK Document to JSON format
+ */
+export async function documentToJson(doc: Document): Promise<DocumentJson> {
+  const project = await doc.project;
+  const creator = await doc.creator;
+
+  return {
+    id: doc.id,
+    title: doc.title,
+    content: doc.content || undefined,
+    icon: doc.icon || undefined,
+    color: doc.color || undefined,
+    slugId: doc.slugId,
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString(),
+    url: doc.url,
+    project: project ? {
+      id: project.id,
+      name: project.name,
+    } : undefined,
+    creator: creator ? {
+      id: creator.id,
+      name: creator.name || creator.displayName || '',
+      email: creator.email || '',
+    } : undefined,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Issue Relation Types & Converters
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Issue relation data in JSON format
+ */
+export interface RelationJson {
+  id: string;
+  type: string;
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+    url: string;
+  };
+  relatedIssue: {
+    id: string;
+    identifier: string;
+    title: string;
+    url: string;
+  };
+}
+
+/**
+ * Convert Linear SDK IssueRelation to JSON format
+ */
+export async function relationToJson(relation: IssueRelation): Promise<RelationJson> {
+  const issue = await relation.issue;
+  const relatedIssue = await relation.relatedIssue;
+
+  return {
+    id: relation.id,
+    type: relation.type,
+    issue: issue ? {
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      url: issue.url,
+    } : { id: '', identifier: '', title: 'Unknown', url: '' },
+    relatedIssue: relatedIssue ? {
+      id: relatedIssue.id,
+      identifier: relatedIssue.identifier,
+      title: relatedIssue.title,
+      url: relatedIssue.url,
+    } : { id: '', identifier: '', title: 'Unknown', url: '' },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Project Update Types & Converters
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Project update data in JSON format
+ */
+export interface ProjectUpdateJson {
+  id: string;
+  body: string;
+  health: string;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  project: {
+    id: string;
+    name: string;
+  };
+}
+
+/**
+ * Convert Linear SDK ProjectUpdate to JSON format
+ */
+export async function projectUpdateToJson(update: ProjectUpdate): Promise<ProjectUpdateJson> {
+  const user = await update.user;
+  const project = await update.project;
+
+  return {
+    id: update.id,
+    body: update.body,
+    health: update.health,
+    createdAt: update.createdAt.toISOString(),
+    updatedAt: update.updatedAt.toISOString(),
+    url: update.url,
+    user: user ? {
+      id: user.id,
+      name: user.name || user.displayName || '',
+      email: user.email || '',
+    } : { id: '', name: 'Unknown', email: '' },
+    project: project ? {
+      id: project.id,
+      name: project.name,
+    } : { id: '', name: 'Unknown' },
   };
 }

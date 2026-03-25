@@ -63,23 +63,32 @@ async function findIssueByIdentifier(client: LinearClient, identifier: string): 
  * Find a project by name or ID
  */
 async function findProject(client: LinearClient, nameOrId: string): Promise<{ id: string; name: string } | null> {
+  // Try by ID first if it looks like a UUID
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameOrId);
+
+  if (isUuid) {
+    try {
+      const project = await client.project(nameOrId);
+      if (project) {
+        return { id: project.id, name: project.name };
+      }
+    } catch {
+      // Not found by ID
+    }
+  }
+
   const projects = await client.projects({
-    filter: {
-      or: [
-        { name: { containsIgnoreCase: nameOrId } },
-        { id: { eq: nameOrId } },
-      ],
-    },
+    filter: { name: { containsIgnoreCase: nameOrId } },
     first: 1,
   });
-  
+
   if (projects.nodes.length > 0) {
     return {
       id: projects.nodes[0].id,
       name: projects.nodes[0].name,
     };
   }
-  
+
   return null;
 }
 
@@ -175,6 +184,7 @@ export function registerIssueCommands(program: Command): void {
     .option('-p, --priority <priority>', 'Priority (1=Urgent, 2=High, 3=Medium, 4=Low)')
     .option('--project <project>', 'Project name or ID')
     .option('--label <labels>', 'Labels (comma-separated)')
+    .option('--parent <parent>', 'Parent issue ID for creating sub-issues')
     .option('--json', 'Output in JSON format')
     .action(async (options) => {
       try {
@@ -324,11 +334,24 @@ export function registerIssueCommands(program: Command): void {
           }
         }
         
+        // Resolve parent issue for sub-issues
+        let parentId: string | undefined;
+        if (options.parent) {
+          const parentIssue = await findIssueByIdentifier(client, options.parent);
+          if (parentIssue) {
+            parentId = parentIssue.id;
+          } else {
+            if (!isJsonMode()) {
+              console.log(chalk.yellow(`Parent issue "${options.parent}" not found, creating as standalone.`));
+            }
+          }
+        }
+
         // Create the issue
         if (!isJsonMode()) {
           console.log(chalk.gray('Creating issue...'));
         }
-        
+
         const issuePayload = await client.createIssue({
           teamId,
           title: title.trim(),
@@ -336,6 +359,7 @@ export function registerIssueCommands(program: Command): void {
           priority: priority || undefined,
           projectId,
           labelIds,
+          parentId,
         });
         
         const createdIssue = await issuePayload.issue;
@@ -404,7 +428,6 @@ export function registerIssueCommands(program: Command): void {
         if (options.comments) {
           const result = await issue.comments({
             first: 50,
-            orderBy: { createdAt: 'ascending' } as unknown as undefined,
           });
           comments = result.nodes;
         }
@@ -699,6 +722,72 @@ export function registerIssueCommands(program: Command): void {
           process.exit(ExitCodes.GENERAL_ERROR);
         }
         console.log(chalk.red('Failed to close issue.'));
+        if (error instanceof Error) {
+          console.log(chalk.gray(error.message));
+        }
+        process.exit(ExitCodes.GENERAL_ERROR);
+      }
+    });
+
+  // ─────────────────────────────────────────────────────────────────
+  // CHILDREN COMMAND (sub-issues)
+  // ─────────────────────────────────────────────────────────────────
+  issue
+    .command('children <id>')
+    .description('List sub-issues of an issue')
+    .option('--json', 'Output in JSON format')
+    .action(async (id: string) => {
+      const client = await getAuthenticatedClient();
+
+      try {
+        const parentIssue = await findIssueByIdentifier(client, id);
+
+        if (!parentIssue) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Issue "${id}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
+          console.log(chalk.red(`Issue "${id}" not found.`));
+          process.exit(ExitCodes.NOT_FOUND);
+        }
+
+        const children = await parentIssue.children({ first: 50 });
+
+        if (isJsonMode()) {
+          const childrenJson: IssueJson[] = await Promise.all(
+            children.nodes.map(iss => issueToJson(iss))
+          );
+          outputJson({
+            parent: { id: parentIssue.id, identifier: parentIssue.identifier, title: parentIssue.title },
+            children: childrenJson,
+            count: childrenJson.length,
+          });
+          return;
+        }
+
+        if (children.nodes.length === 0) {
+          console.log(chalk.yellow(`No sub-issues found for ${formatIdentifier(parentIssue.identifier)}.`));
+          return;
+        }
+
+        console.log('');
+        console.log(chalk.bold(`Sub-issues of ${formatIdentifier(parentIssue.identifier)}: ${parentIssue.title}`));
+        console.log(chalk.gray('─'.repeat(80)));
+
+        printListHeader();
+
+        for (const child of children.nodes) {
+          console.log(await formatIssueRow(child));
+        }
+
+        console.log('');
+        console.log(chalk.gray(`${children.nodes.length} sub-issue${children.nodes.length === 1 ? '' : 's'}`));
+      } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('FETCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
+        console.log(chalk.red('Failed to fetch sub-issues.'));
         if (error instanceof Error) {
           console.log(chalk.gray(error.message));
         }

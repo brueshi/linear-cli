@@ -2,6 +2,15 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { getAuthenticatedClient } from '../lib/client.js';
 import { formatIdentifier, formatPriority, formatState, truncate, printListHeader } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  issueToJson,
+  issueSearchResultToJson,
+  ExitCodes,
+  type IssueJson,
+} from '../utils/json-output.js';
 
 /**
  * Register search commands
@@ -17,6 +26,7 @@ export function registerSearchCommands(program: Command): void {
     .option('-l, --label <name>', 'Filter by label')
     .option('--limit <number>', 'Maximum results to return', '25')
     .option('--include-archived', 'Include archived issues')
+    .option('--json', 'Output in JSON format')
     .action(async (query: string, options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -60,8 +70,10 @@ export function registerSearchCommands(program: Command): void {
           filter.archivedAt = { null: true };
         }
 
-        console.log(chalk.gray(`Searching for "${query}"...`));
-        console.log('');
+        if (!isJsonMode()) {
+          console.log(chalk.gray(`Searching for "${query}"...`));
+          console.log('');
+        }
 
         // Use issueSearch for full-text search
         const searchResult = await client.searchIssues(query, {
@@ -71,6 +83,14 @@ export function registerSearchCommands(program: Command): void {
         });
 
         const issues = searchResult.nodes;
+
+        if (isJsonMode()) {
+          const issuesJson: IssueJson[] = await Promise.all(
+            issues.map(iss => issueSearchResultToJson(iss))
+          );
+          outputJson({ issues: issuesJson, count: issuesJson.length, query });
+          return;
+        }
 
         if (issues.length === 0) {
           console.log(chalk.yellow('No issues found matching your search.'));
@@ -107,12 +127,22 @@ export function registerSearchCommands(program: Command): void {
         if (error instanceof Error) {
           // Handle case where searchIssues might not be available
           if (error.message.includes('searchIssues') || error.message.includes('not a function')) {
-            console.log(chalk.yellow('Full-text search not available. Falling back to filtered search...'));
+            if (!isJsonMode()) {
+              console.log(chalk.yellow('Full-text search not available. Falling back to filtered search...'));
+            }
             await fallbackSearch(query, options);
             return;
           }
+          if (isJsonMode()) {
+            outputJsonError('SEARCH_FAILED', error.message);
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red(`Search failed: ${error.message}`));
         } else {
+          if (isJsonMode()) {
+            outputJsonError('SEARCH_FAILED', 'Unknown error');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red('Search failed with an unknown error.'));
         }
         process.exit(1);
@@ -158,6 +188,14 @@ async function fallbackSearch(query: string, options: Record<string, unknown>): 
     filter,
     first: limit,
   });
+
+  if (isJsonMode()) {
+    const issuesJson: IssueJson[] = await Promise.all(
+      issues.nodes.map(iss => issueToJson(iss))
+    );
+    outputJson({ issues: issuesJson, count: issuesJson.length, query });
+    return;
+  }
 
   if (issues.nodes.length === 0) {
     console.log(chalk.yellow('No issues found matching your search.'));

@@ -5,6 +5,13 @@ import { getAuthenticatedClient } from '../lib/client.js';
 import { ConfigManager } from '../lib/config.js';
 import { resolveOrCreateLabels, parseLabels } from '../lib/agent/labels.js';
 import { formatIdentifier } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  issueToJson,
+  ExitCodes,
+} from '../utils/json-output.js';
 
 export function registerQuickCommand(program: Command): void {
   program
@@ -19,6 +26,7 @@ export function registerQuickCommand(program: Command): void {
     .option('-a, --assignee <email>', 'Assignee email (use "me" for yourself)')
     .option('--due <date>', 'Due date (YYYY-MM-DD format)')
     .option('--parent <id>', 'Parent issue ID for sub-issues')
+    .option('--json', 'Output in JSON format')
     .action(async (title: string, options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -66,14 +74,9 @@ export function registerQuickCommand(program: Command): void {
         let projectId: string | undefined;
         
         if (options.project) {
-          // Search for project by name or ID
+          // Search for project by name
           const projects = await client.projects({
-            filter: {
-              or: [
-                { name: { containsIgnoreCase: options.project } },
-                { id: { eq: options.project } },
-              ],
-            },
+            filter: { name: { containsIgnoreCase: options.project } },
             first: 1,
           });
           
@@ -174,13 +177,22 @@ export function registerQuickCommand(program: Command): void {
         const createdIssue = await issuePayload.issue;
         
         if (createdIssue) {
+          if (isJsonMode()) {
+            const issueJson = await issueToJson(createdIssue);
+            outputJson({ issue: issueJson });
+            return;
+          }
           console.log(
-            chalk.green('Created ') + 
-            formatIdentifier(createdIssue.identifier) + 
+            chalk.green('Created ') +
+            formatIdentifier(createdIssue.identifier) +
             ' ' + createdIssue.title
           );
           console.log(chalk.gray(createdIssue.url));
         } else {
+          if (isJsonMode()) {
+            outputJsonError('CREATE_FAILED', 'Failed to create issue');
+            process.exit(ExitCodes.GENERAL_ERROR);
+          }
           console.log(chalk.red('Failed to create issue.'));
           process.exit(1);
         }
@@ -188,6 +200,10 @@ export function registerQuickCommand(program: Command): void {
         if (error instanceof Error && error.name === 'ExitPromptError') {
           console.log(chalk.gray('\nCancelled.'));
           return;
+        }
+        if (isJsonMode()) {
+          outputJsonError('CREATE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
         }
         console.log(chalk.red('Failed to create issue.'));
         if (error instanceof Error) {

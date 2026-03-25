@@ -2,7 +2,14 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import { getAuthenticatedClient } from '../lib/client.js';
+import { findIssueByIdentifier } from '../utils/find-issue.js';
 import { formatIdentifier, formatState, truncate } from '../utils/format.js';
+import {
+  isJsonMode,
+  outputJson,
+  outputJsonError,
+  ExitCodes,
+} from '../utils/json-output.js';
 
 /**
  * Register batch commands for bulk operations
@@ -22,8 +29,10 @@ export function registerBatchCommands(program: Command): void {
     .option('--add-label <labels>', 'Add labels (comma-separated)')
     .option('--remove-label <labels>', 'Remove labels (comma-separated)')
     .option('--project <name>', 'Move to project')
+    .option('--cycle <number>', 'Add to cycle number')
     .option('--file <path>', 'Read issue IDs from file (one per line)')
     .option('-y, --yes', 'Skip confirmation')
+    .option('--json', 'Output in JSON format')
     .action(async (issues: string[], options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -43,6 +52,10 @@ export function registerBatchCommands(program: Command): void {
         issueIds = [...new Set(issueIds)];
 
         if (issueIds.length === 0) {
+          if (isJsonMode()) {
+            outputJsonError('NO_INPUT', 'No issue IDs provided');
+            process.exit(ExitCodes.VALIDATION_ERROR);
+          }
           console.log(chalk.yellow('No issue IDs provided.'));
           return;
         }
@@ -55,23 +68,31 @@ export function registerBatchCommands(program: Command): void {
         if (options.addLabel) updateFields.push(`add labels: ${options.addLabel}`);
         if (options.removeLabel) updateFields.push(`remove labels: ${options.removeLabel}`);
         if (options.project) updateFields.push(`project: ${options.project}`);
+        if (options.cycle) updateFields.push(`cycle: ${options.cycle}`);
 
         if (updateFields.length === 0) {
+          if (isJsonMode()) {
+            outputJsonError('NO_UPDATES', 'No update options specified');
+            process.exit(ExitCodes.VALIDATION_ERROR);
+          }
           console.log(chalk.yellow('No update options specified. Use --help for available options.'));
           return;
         }
 
-        console.log(chalk.bold(`\nBatch Update: ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'}`));
-        console.log(chalk.gray('Updates to apply:'));
-        for (const field of updateFields) {
-          console.log(chalk.gray(`  - ${field}`));
+        if (!isJsonMode()) {
+          console.log(chalk.bold(`\nBatch Update: ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'}`));
+          console.log(chalk.gray('Updates to apply:'));
+          for (const field of updateFields) {
+            console.log(chalk.gray(`  - ${field}`));
+          }
+          console.log('');
         }
-        console.log('');
 
         // Process each issue
         let succeeded = 0;
         let failed = 0;
         const errors: { id: string; error: string }[] = [];
+        const results: { id: string; identifier: string; success: boolean; error?: string }[] = [];
 
         // Get viewer for "me" assignee
         const viewer = options.assignee === 'me' ? await client.viewer : null;
@@ -84,6 +105,10 @@ export function registerBatchCommands(program: Command): void {
             first: 1,
           });
           if (projects.nodes.length === 0) {
+            if (isJsonMode()) {
+              outputJsonError('NOT_FOUND', `Project "${options.project}" not found`);
+              process.exit(ExitCodes.NOT_FOUND);
+            }
             console.log(chalk.red(`Project "${options.project}" not found.`));
             process.exit(1);
           }
@@ -92,9 +117,11 @@ export function registerBatchCommands(program: Command): void {
 
         for (const issueId of issueIds) {
           try {
-            process.stdout.write(chalk.gray(`Updating ${issueId}...`));
+            if (!isJsonMode()) {
+              process.stdout.write(chalk.gray(`Updating ${issueId}...`));
+            }
 
-            const issue = await findIssue(client, issueId);
+            const issue = await findIssueByIdentifier(client, issueId);
             if (!issue) {
               throw new Error('Issue not found');
             }
@@ -104,9 +131,7 @@ export function registerBatchCommands(program: Command): void {
             // Handle status
             if (options.status) {
               const team = await issue.team;
-              if (!team) {
-                throw new Error('Issue has no team');
-              }
+              if (!team) throw new Error('Issue has no team');
               const states = await team.states();
               const state = states.nodes.find(s =>
                 s.name.toLowerCase().includes(options.status.toLowerCase())
@@ -114,16 +139,14 @@ export function registerBatchCommands(program: Command): void {
               if (state) {
                 updateData.stateId = state.id;
               } else {
-                throw new Error(`State "${options.status}" not found`);
+                throw new Error(`State "${options.status}" not found. Available: ${states.nodes.map(s => s.name).join(', ')}`);
               }
             }
 
             // Handle priority
             if (options.priority) {
               const priority = parseInt(options.priority);
-              if (priority < 0 || priority > 4) {
-                throw new Error('Priority must be 0-4');
-              }
+              if (priority < 0 || priority > 4) throw new Error('Priority must be 0-4');
               updateData.priority = priority;
             }
 
@@ -138,9 +161,7 @@ export function registerBatchCommands(program: Command): void {
                   filter: { email: { containsIgnoreCase: options.assignee } },
                   first: 1,
                 });
-                if (users.nodes.length === 0) {
-                  throw new Error(`User "${options.assignee}" not found`);
-                }
+                if (users.nodes.length === 0) throw new Error(`User "${options.assignee}" not found`);
                 updateData.assigneeId = users.nodes[0].id;
               }
             }
@@ -152,9 +173,7 @@ export function registerBatchCommands(program: Command): void {
 
               if (options.addLabel) {
                 const team = await issue.team;
-                if (!team) {
-                  throw new Error('Issue has no team');
-                }
+                if (!team) throw new Error('Issue has no team');
                 const teamLabels = await client.issueLabels({
                   filter: { team: { id: { eq: team.id } } },
                   first: 100,
@@ -162,9 +181,7 @@ export function registerBatchCommands(program: Command): void {
 
                 const labelsToAdd = options.addLabel.split(',').map((l: string) => l.trim().toLowerCase());
                 for (const labelName of labelsToAdd) {
-                  const label = teamLabels.nodes.find(l =>
-                    l.name.toLowerCase() === labelName
-                  );
+                  const label = teamLabels.nodes.find(l => l.name.toLowerCase() === labelName);
                   if (label && !labelIds.includes(label.id)) {
                     labelIds.push(label.id);
                   }
@@ -190,19 +207,30 @@ export function registerBatchCommands(program: Command): void {
             // Apply update
             await issue.update(updateData);
 
-            process.stdout.clearLine(0);
-            process.stdout.cursorTo(0);
-            console.log(chalk.green(`${formatIdentifier(issue.identifier)} updated`));
+            if (!isJsonMode()) {
+              process.stdout.clearLine(0);
+              process.stdout.cursorTo(0);
+              console.log(chalk.green(`${formatIdentifier(issue.identifier)} updated`));
+            }
+            results.push({ id: issue.id, identifier: issue.identifier, success: true });
             succeeded++;
 
           } catch (error) {
-            process.stdout.clearLine(0);
-            process.stdout.cursorTo(0);
             const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            console.log(chalk.red(`${issueId} failed: ${errorMsg}`));
+            if (!isJsonMode()) {
+              process.stdout.clearLine(0);
+              process.stdout.cursorTo(0);
+              console.log(chalk.red(`${issueId} failed: ${errorMsg}`));
+            }
             errors.push({ id: issueId, error: errorMsg });
+            results.push({ id: issueId, identifier: issueId, success: false, error: errorMsg });
             failed++;
           }
+        }
+
+        if (isJsonMode()) {
+          outputJson({ results, succeeded, failed, total: issueIds.length });
+          return;
         }
 
         // Summary
@@ -214,6 +242,10 @@ export function registerBatchCommands(program: Command): void {
         }
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('BATCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         handleError(error);
       }
     });
@@ -224,6 +256,7 @@ export function registerBatchCommands(program: Command): void {
     .description('Close multiple issues')
     .option('--file <path>', 'Read issue IDs from file')
     .option('--state <name>', 'Completion state name (default: "Done")')
+    .option('--json', 'Output in JSON format')
     .action(async (issues: string[], options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -241,42 +274,50 @@ export function registerBatchCommands(program: Command): void {
         issueIds = [...new Set(issueIds)];
         const stateName = options.state || 'Done';
 
-        console.log(chalk.bold(`\nClosing ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'}...`));
-        console.log('');
+        if (!isJsonMode()) {
+          console.log(chalk.bold(`\nClosing ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'}...`));
+          console.log('');
+        }
 
         let succeeded = 0;
         let failed = 0;
+        const results: { id: string; identifier: string; success: boolean; error?: string }[] = [];
 
         for (const issueId of issueIds) {
           try {
-            const issue = await findIssue(client, issueId);
-            if (!issue) {
-              throw new Error('Issue not found');
-            }
+            const issue = await findIssueByIdentifier(client, issueId);
+            if (!issue) throw new Error('Issue not found');
 
             const team = await issue.team;
-            if (!team) {
-              throw new Error('Issue has no team');
-            }
+            if (!team) throw new Error('Issue has no team');
             const states = await team.states();
             const completedState = states.nodes.find(s =>
               s.type === 'completed' &&
               s.name.toLowerCase().includes(stateName.toLowerCase())
             ) || states.nodes.find(s => s.type === 'completed');
 
-            if (!completedState) {
-              throw new Error('No completed state found');
-            }
+            if (!completedState) throw new Error('No completed state found');
 
             await issue.update({ stateId: completedState.id });
-            console.log(chalk.green(`${formatIdentifier(issue.identifier)} closed`));
+            if (!isJsonMode()) {
+              console.log(chalk.green(`${formatIdentifier(issue.identifier)} closed`));
+            }
+            results.push({ id: issue.id, identifier: issue.identifier, success: true });
             succeeded++;
 
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            console.log(chalk.red(`${issueId} failed: ${errorMsg}`));
+            if (!isJsonMode()) {
+              console.log(chalk.red(`${issueId} failed: ${errorMsg}`));
+            }
+            results.push({ id: issueId, identifier: issueId, success: false, error: errorMsg });
             failed++;
           }
+        }
+
+        if (isJsonMode()) {
+          outputJson({ results, succeeded, failed, total: issueIds.length });
+          return;
         }
 
         console.log('');
@@ -287,6 +328,10 @@ export function registerBatchCommands(program: Command): void {
         }
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('BATCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         handleError(error);
       }
     });
@@ -297,9 +342,14 @@ export function registerBatchCommands(program: Command): void {
     .description('Assign multiple issues to a user')
     .option('--to <email>', 'Assignee email (use "me" for yourself)')
     .option('--file <path>', 'Read issue IDs from file')
+    .option('--json', 'Output in JSON format')
     .action(async (issues: string[], options) => {
       try {
         if (!options.to) {
+          if (isJsonMode()) {
+            outputJsonError('VALIDATION_ERROR', 'Please specify --to <email> or --to me');
+            process.exit(ExitCodes.VALIDATION_ERROR);
+          }
           console.log(chalk.yellow('Please specify --to <email> or --to me'));
           return;
         }
@@ -331,6 +381,10 @@ export function registerBatchCommands(program: Command): void {
             first: 1,
           });
           if (users.nodes.length === 0) {
+            if (isJsonMode()) {
+              outputJsonError('NOT_FOUND', `User "${options.to}" not found`);
+              process.exit(ExitCodes.NOT_FOUND);
+            }
             console.log(chalk.red(`User "${options.to}" not found.`));
             process.exit(1);
           }
@@ -338,28 +392,40 @@ export function registerBatchCommands(program: Command): void {
           assigneeName = users.nodes[0].name || users.nodes[0].email;
         }
 
-        console.log(chalk.bold(`\nAssigning ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'} to ${assigneeName}...`));
-        console.log('');
+        if (!isJsonMode()) {
+          console.log(chalk.bold(`\nAssigning ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'} to ${assigneeName}...`));
+          console.log('');
+        }
 
         let succeeded = 0;
         let failed = 0;
+        const results: { id: string; identifier: string; success: boolean; error?: string }[] = [];
 
         for (const issueId of issueIds) {
           try {
-            const issue = await findIssue(client, issueId);
-            if (!issue) {
-              throw new Error('Issue not found');
-            }
+            const issue = await findIssueByIdentifier(client, issueId);
+            if (!issue) throw new Error('Issue not found');
 
             await issue.update({ assigneeId });
-            console.log(chalk.green(`${formatIdentifier(issue.identifier)} assigned`));
+            if (!isJsonMode()) {
+              console.log(chalk.green(`${formatIdentifier(issue.identifier)} assigned`));
+            }
+            results.push({ id: issue.id, identifier: issue.identifier, success: true });
             succeeded++;
 
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-            console.log(chalk.red(`${issueId} failed: ${errorMsg}`));
+            if (!isJsonMode()) {
+              console.log(chalk.red(`${issueId} failed: ${errorMsg}`));
+            }
+            results.push({ id: issueId, identifier: issueId, success: false, error: errorMsg });
             failed++;
           }
+        }
+
+        if (isJsonMode()) {
+          outputJson({ results, assignee: { id: assigneeId, name: assigneeName }, succeeded, failed, total: issueIds.length });
+          return;
         }
 
         console.log('');
@@ -370,41 +436,13 @@ export function registerBatchCommands(program: Command): void {
         }
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('BATCH_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         handleError(error);
       }
     });
-}
-
-/**
- * Find an issue by identifier or ID
- */
-async function findIssue(
-  client: Awaited<ReturnType<typeof getAuthenticatedClient>>,
-  identifier: string
-) {
-  const normalized = identifier.toUpperCase();
-  const match = normalized.match(/^([A-Z]+)-(\d+)$/);
-
-  if (match) {
-    const [, teamKey, numberStr] = match;
-    const issueNumber = parseInt(numberStr, 10);
-
-    const issues = await client.issues({
-      filter: {
-        team: { key: { eq: teamKey } },
-        number: { eq: issueNumber },
-      },
-      first: 1,
-    });
-
-    return issues.nodes[0] || null;
-  }
-
-  try {
-    return await client.issue(identifier);
-  } catch {
-    return null;
-  }
 }
 
 /**

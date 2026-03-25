@@ -42,7 +42,6 @@ export function registerCommentCommands(program: Command): void {
 
         const comments = await issue.comments({
           first: 50,
-          orderBy: { createdAt: 'ascending' } as unknown as undefined,
         });
 
         // Filter comments based on resolved state
@@ -185,29 +184,44 @@ export function registerCommentCommands(program: Command): void {
   comment
     .command('resolve <commentId>')
     .description('Mark a comment as resolved')
+    .option('--json', 'Output in JSON format')
     .action(async (commentId: string) => {
       try {
         const client = await getAuthenticatedClient();
 
-        // Find the comment by ID
         const commentNode = await client.comment({ id: commentId });
 
         if (!commentNode) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Comment "${commentId}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Comment "${commentId}" not found.`));
           process.exit(1);
         }
 
         if (commentNode.resolvedAt) {
+          if (isJsonMode()) {
+            outputJson({ resolved: true, alreadyResolved: true, id: commentId });
+            return;
+          }
           console.log(chalk.yellow('Comment is already resolved.'));
           return;
         }
 
-        // Resolve the comment using resolveComment mutation
         await client.commentResolve(commentId);
 
+        if (isJsonMode()) {
+          outputJson({ resolved: true, id: commentId });
+          return;
+        }
         console.log(chalk.green('Comment marked as resolved.'));
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('RESOLVE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         handleError(error);
       }
     });
@@ -216,6 +230,7 @@ export function registerCommentCommands(program: Command): void {
   comment
     .command('unresolve <commentId>')
     .description('Mark a resolved comment as unresolved')
+    .option('--json', 'Output in JSON format')
     .action(async (commentId: string) => {
       try {
         const client = await getAuthenticatedClient();
@@ -223,21 +238,36 @@ export function registerCommentCommands(program: Command): void {
         const commentNode = await client.comment({ id: commentId });
 
         if (!commentNode) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Comment "${commentId}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Comment "${commentId}" not found.`));
           process.exit(1);
         }
 
         if (!commentNode.resolvedAt) {
+          if (isJsonMode()) {
+            outputJson({ unresolved: true, alreadyUnresolved: true, id: commentId });
+            return;
+          }
           console.log(chalk.yellow('Comment is not resolved.'));
           return;
         }
 
-        // Unresolve the comment using unresolveComment mutation
         await client.commentUnresolve(commentId);
 
+        if (isJsonMode()) {
+          outputJson({ unresolved: true, id: commentId });
+          return;
+        }
         console.log(chalk.green('Comment marked as unresolved.'));
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('UNRESOLVE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         handleError(error);
       }
     });
@@ -247,6 +277,7 @@ export function registerCommentCommands(program: Command): void {
     .command('delete <commentId>')
     .description('Delete a comment')
     .option('-y, --yes', 'Skip confirmation')
+    .option('--json', 'Output in JSON format')
     .action(async (commentId: string, options) => {
       try {
         const client = await getAuthenticatedClient();
@@ -254,12 +285,16 @@ export function registerCommentCommands(program: Command): void {
         const commentNode = await client.comment({ id: commentId });
 
         if (!commentNode) {
+          if (isJsonMode()) {
+            outputJsonError('NOT_FOUND', `Comment "${commentId}" not found`);
+            process.exit(ExitCodes.NOT_FOUND);
+          }
           console.log(chalk.red(`Comment "${commentId}" not found.`));
           process.exit(1);
         }
 
-        // Confirm deletion
-        if (!options.yes) {
+        // Confirm deletion (skip in JSON mode or with -y)
+        if (!options.yes && !isJsonMode()) {
           const shouldDelete = await confirm({
             message: 'Are you sure you want to delete this comment?',
             default: false,
@@ -273,9 +308,17 @@ export function registerCommentCommands(program: Command): void {
 
         await client.deleteComment(commentId);
 
+        if (isJsonMode()) {
+          outputJson({ deleted: true, id: commentId });
+          return;
+        }
         console.log(chalk.green('Comment deleted.'));
 
       } catch (error) {
+        if (isJsonMode()) {
+          outputJsonError('DELETE_FAILED', error instanceof Error ? error.message : 'Unknown error');
+          process.exit(ExitCodes.GENERAL_ERROR);
+        }
         handleError(error);
       }
     });
